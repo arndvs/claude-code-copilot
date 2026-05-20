@@ -8,6 +8,14 @@
 
 set -euo pipefail
 
+for cmd in curl jq; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        echo "❌ $cmd is required but not installed." >&2
+        echo "   Install it and try again." >&2
+        exit 1
+    fi
+done
+
 GITHUB_TOKEN_FILE="$HOME/.config/litellm/github_copilot/access-token"
 ENABLED_ONLY=false
 
