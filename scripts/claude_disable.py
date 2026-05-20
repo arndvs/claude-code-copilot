@@ -20,8 +20,21 @@ def main():
         with open(settings_file) as f:
             settings = json.load(f)
 
-        if 'env' in settings:
-            del settings['env']
+        proxy_keys = [
+            'ANTHROPIC_BASE_URL',
+            'ANTHROPIC_AUTH_TOKEN',
+            'CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS',
+        ]
+        env = settings.get('env', {})
+        removed = [k for k in proxy_keys if k in env]
+        for k in removed:
+            del env[k]
+
+        if removed:
+            if env:
+                settings['env'] = env
+            else:
+                del settings['env']
             with open(settings_file, 'w') as f:
                 json.dump(settings, f, indent=2)
                 f.write('\n')
