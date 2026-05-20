@@ -31,14 +31,16 @@ def main():
         except (json.JSONDecodeError, IOError):
             settings = {}
 
-    # Inject proxy env vars — preserves all other settings
+    # Inject proxy env vars — merges into existing env dict
     settings.setdefault('$schema', 'https://json.schemastore.org/claude-code-settings.json')
-    settings['env'] = {
+    env = settings.get('env', {})
+    env.update({
         'ANTHROPIC_BASE_URL': f'http://localhost:{port}',
         'ANTHROPIC_AUTH_TOKEN': master_key,
         # Required — Copilot doesn't support extended thinking
         'CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS': '1',
-    }
+    })
+    settings['env'] = env
 
     with open(settings_file, 'w') as f:
         json.dump(settings, f, indent=2)
