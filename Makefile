@@ -31,7 +31,7 @@ import uuid; \
 mk = 'sk-' + str(uuid.uuid4()); \
 open('.env','w').write('LITELLM_MASTER_KEY=' + mk + '\nLITELLM_PORT=$(PORT)\nLITELLM_LOCAL_MODEL_COST_MAP=true\n'); \
 print('✅ .env created'); \
-print('   LITELLM_MASTER_KEY=' + mk); \
+print('   LITELLM_MASTER_KEY stored in .env'); \
 "; \
 	else \
 		echo "✅ .env already exists — skipping"; \
@@ -53,7 +53,7 @@ start:
 		litellm --config litellm_config.yaml --port $(PORT)
 
 stop:
-	@pkill -f litellm 2>/dev/null && echo "✅ Proxy stopped" || echo "ℹ️  No proxy process found"
+	@pkill -f "litellm --config litellm_config.yaml" 2>/dev/null && echo "✅ Proxy stopped" || echo "ℹ️  No proxy process found"
 
 # ── Test ───────────────────────────────────────────────────────
 
@@ -66,7 +66,7 @@ test:
 		-H "Authorization: Bearer $$MASTER_KEY" \
 		-d '{"model":"claude-sonnet-4-6","max_tokens":50,"messages":[{"role":"user","content":"Say hello in one word."}]}' \
 	| python3 -m json.tool && echo "" && echo "✅ Proxy is working!" \
-	|| echo "❌ Test failed. Is the proxy running? ('make start')"
+	|| { echo "❌ Test failed. Is the proxy running? ('make start')"; exit 1; }
 
 # ── Claude Code configuration ──────────────────────────────────
 
