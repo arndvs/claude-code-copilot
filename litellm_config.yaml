@@ -1,0 +1,24 @@
+litellm_settings:
+  drop_params: true
+
+model_list:
+  # Wildcard — any model name Claude Code sends gets forwarded to GitHub Copilot
+  - model_name: "*"
+    litellm_params:
+      model: "github_copilot/*"
+      extra_headers:
+        editor-version: "vscode/1.85.1"
+        editor-plugin-version: "copilot/1.155.0"
+        Copilot-Integration-Id: "vscode-chat"
+        user-agent: "GithubCopilot/1.155.0"
+
+  # Fallback — Azure OpenAI (uncomment when quota available)
+  # - model_name: "*"
+  #   litellm_params:
+  #     model: "os.environ/AZURE_OPENAI_DEPLOYMENT"
+  #     api_key: "os.environ/AZURE_OPENAI_API_KEY"
+  #     api_base: "os.environ/AZURE_OPENAI_ENDPOINT"
+  #     api_version: "os.environ/AZURE_OPENAI_API_VERSION"
+
+general_settings:
+  master_key: "os.environ/LITELLM_MASTER_KEY"
