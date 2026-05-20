@@ -1,0 +1,34 @@
+services:
+  proxy:
+    build: .
+    ports:
+      - "${LITELLM_PORT:-4000}:4000"
+    env_file: .env
+    environment:
+      - LITELLM_LOCAL_MODEL_COST_MAP=true
+    volumes:
+      # Mount cached GitHub Copilot OAuth token
+      - ~/.config/litellm:/root/.config/litellm:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:4000/health/readiness"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: litellm
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: litellm
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
