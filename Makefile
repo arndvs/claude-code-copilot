@@ -45,12 +45,13 @@ print('   LITELLM_MASTER_KEY stored in .env'); \
 # ── Proxy lifecycle ────────────────────────────────────────────
 
 start:
-	@echo "Starting LiteLLM → GitHub Copilot proxy on port $(PORT)..."
 	@if [ ! -f .env ]; then echo "❌ .env not found. Run 'make setup' first."; exit 1; fi
 	@set -a && . ./.env && set +a && \
+	PORT=$${LITELLM_PORT:-$(PORT)} && \
+	echo "Starting LiteLLM → GitHub Copilot proxy on port $$PORT..." && \
 	UV_NATIVE_TLS=true uv run \
 		--with "litellm[proxy]" \
-		litellm --config litellm_config.yaml --port $(PORT)
+		litellm --config litellm_config.yaml --port $$PORT
 
 stop:
 	@pkill -f "litellm --config litellm_config.yaml" 2>/dev/null && echo "✅ Proxy stopped" || echo "ℹ️  No proxy process found"
@@ -59,9 +60,11 @@ stop:
 
 test:
 	@if [ ! -f .env ]; then echo "❌ .env not found. Run 'make setup' first."; exit 1; fi
-	@MASTER_KEY=$$(grep LITELLM_MASTER_KEY .env | cut -d'=' -f2 | tr -d '"'); \
-	echo "Testing proxy at http://localhost:$(PORT)..."; \
-	curl -sf -X POST http://localhost:$(PORT)/v1/messages \
+	@set -a && . ./.env && set +a && \
+	PORT=$${LITELLM_PORT:-$(PORT)} && \
+	MASTER_KEY=$$LITELLM_MASTER_KEY && \
+	echo "Testing proxy at http://localhost:$$PORT..." && \
+	curl -sf -X POST http://localhost:$$PORT/v1/messages \
 		-H "Content-Type: application/json" \
 		-H "Authorization: Bearer $$MASTER_KEY" \
 		-d '{"model":"claude-sonnet-4-6","max_tokens":50,"messages":[{"role":"user","content":"Say hello in one word."}]}' \
@@ -87,13 +90,7 @@ claude-disable:
 		cp ~/.claude/settings.json $$BACKUP; \
 		echo "📁 Backed up current settings to $$BACKUP"; \
 	fi
-	@if ls ~/.claude/settings.json.backup.* >/dev/null 2>&1; then \
-		LATEST=$$(ls -t ~/.claude/settings.json.backup.* | head -1); \
-		cp "$$LATEST" ~/.claude/settings.json; \
-		echo "✅ Restored settings from $$LATEST"; \
-	else \
-		python3 scripts/claude_disable.py; \
-	fi
+	@python3 scripts/claude_disable.py
 
 claude-status:
 	@echo ""
@@ -102,10 +99,12 @@ claude-status:
 	@if [ -f ~/.claude/settings.json ]; then \
 		cat ~/.claude/settings.json | python3 -m json.tool 2>/dev/null || cat ~/.claude/settings.json; \
 		echo ""; \
-		if grep -q "localhost:$(PORT)" ~/.claude/settings.json 2>/dev/null; then \
-			echo "🔗 Routing: local proxy (http://localhost:$(PORT))"; \
-			if curl -sf http://localhost:$(PORT)/health/readiness >/dev/null 2>&1; then \
-				echo "✅ Proxy: running"; \
+		PORT=$$(grep LITELLM_PORT .env 2>/dev/null | cut -d'=' -f2 | tr -d '"' || echo '$(PORT)'); \
+		PORT=$${PORT:-$(PORT)}; \
+		if grep -q "localhost:" ~/.claude/settings.json 2>/dev/null; then \
+			echo "🔗 Routing: local proxy"; \
+			if curl -sf http://localhost:$$PORT/health/readiness >/dev/null 2>&1; then \
+				echo "✅ Proxy: running on port $$PORT"; \
 			else \
 				echo "❌ Proxy: not running — run 'make start'"; \
 			fi; \
