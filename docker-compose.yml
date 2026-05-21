@@ -9,7 +9,7 @@ services:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-litellm}:${POSTGRES_PASSWORD:-litellm}@db:5432/${POSTGRES_DB:-litellm}
     volumes:
       # Mount cached GitHub Copilot OAuth token
-      - ${HOME}/.config/litellm:/root/.config/litellm:ro
+      - ${HOME}/.config/litellm/github_copilot:/root/.config/litellm/github_copilot:ro
     restart: unless-stopped
     depends_on:
       db:
@@ -30,7 +30,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U litellm"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER"]
       interval: 10s
       timeout: 5s
       retries: 5
