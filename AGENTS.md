@@ -30,6 +30,6 @@ Claude Code  →  LiteLLM (:4000)  →  api.githubcopilot.com
 
 - Shell scripts use `bash` with `set -euo pipefail`
 - Python scripts are standalone (no dependencies beyond stdlib)
-- Port default: `4000` (override via `LITELLM_PORT` or `make start PORT=XXXX`)
+- Port default: `4000`; if `LITELLM_PORT` is set (for example in `.env`), it takes precedence. `make start PORT=XXXX` only applies when `LITELLM_PORT` is unset or removed.
 - `UV_NATIVE_TLS=true` is required for corporate proxy / SSL environments
 - `LITELLM_LOCAL_MODEL_COST_MAP=true` avoids remote cost map fetch
