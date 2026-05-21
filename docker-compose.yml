@@ -15,7 +15,7 @@ services:
       db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4000/health/readiness')"]
+      test: ["CMD", "python", "-c", "import sys, urllib.request;\ntry: urllib.request.urlopen('http://localhost:4000/health/readiness', timeout=3)\nexcept Exception: sys.exit(1)"]
       interval: 30s
       timeout: 5s
       retries: 3
