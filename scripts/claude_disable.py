@@ -44,8 +44,22 @@ def main():
         else:
             print('✅ No proxy configuration found — nothing to remove.')
 
+    except json.JSONDecodeError as e:
+        print(
+            f'❌ Invalid JSON in {settings_file}: {e}. '
+            'Please fix the file contents or remove it and try again.',
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    except OSError as e:
+        print(
+            f'❌ Error accessing {settings_file}: {e}. '
+            'Please check file permissions and try again.',
+            file=sys.stderr,
+        )
+        sys.exit(1)
     except Exception as e:
-        print(f'❌ Error updating settings: {e}')
+        print(f'❌ Unexpected error updating settings: {e}', file=sys.stderr)
         sys.exit(1)
 
 if __name__ == '__main__':

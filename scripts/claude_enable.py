@@ -6,7 +6,9 @@ Writes proxy env vars to ~/.claude/settings.json without touching other settings
 Usage: python3 scripts/claude_enable.py <master_key> [port]
 """
 import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 def main():
@@ -61,9 +63,17 @@ def main():
     })
     settings['env'] = env
 
-    with open(settings_file, 'w') as f:
-        json.dump(settings, f, indent=2)
-        f.write('\n')
+    fd, tmp_path = tempfile.mkstemp(
+        dir=str(claude_dir), suffix='.tmp', prefix='settings_'
+    )
+    try:
+        with os.fdopen(fd, 'w') as f:
+            json.dump(settings, f, indent=2)
+            f.write('\n')
+        os.replace(tmp_path, str(settings_file))
+    except BaseException:
+        os.unlink(tmp_path)
+        raise
     settings_file.chmod(0o600)
 
     print(f'✅ Claude Code configured to use proxy at http://localhost:{port}')

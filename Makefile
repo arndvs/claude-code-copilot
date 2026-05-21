@@ -40,6 +40,12 @@ print('   LITELLM_MASTER_KEY stored in .env'); \
 	@if ! command -v uv >/dev/null 2>&1; then \
 		echo "Installing uv..."; \
 		curl -LsSf https://astral.sh/uv/install.sh | sh; \
+		if ! command -v uv >/dev/null 2>&1; then \
+			echo "❌ uv was installed but is not available on PATH in this shell."; \
+			echo "   The installer often places uv in $$HOME/.local/bin and requires a new shell."; \
+			echo "   Add $$HOME/.local/bin to your PATH or start a new shell, then re-run 'make setup' or 'make start'."; \
+			exit 1; \
+		fi; \
 	fi
 	@echo "✅ Setup complete. Run 'make start' to start the proxy."
 
