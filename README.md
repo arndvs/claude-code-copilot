@@ -127,7 +127,7 @@ claude --model gpt-4o
 ## Verify with curl
 
 ```bash
-source .env
+. ./.env
 curl -X POST http://localhost:${LITELLM_PORT:-4000}/v1/messages \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -H "Content-Type: application/json" \
