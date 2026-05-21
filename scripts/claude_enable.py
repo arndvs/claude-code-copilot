@@ -20,7 +20,8 @@ def main():
     claude_dir = Path.home() / '.claude'
     settings_file = claude_dir / 'settings.json'
 
-    claude_dir.mkdir(exist_ok=True)
+    claude_dir.mkdir(mode=0o700, exist_ok=True)
+    claude_dir.chmod(0o700)
 
     # Load existing settings or start fresh
     settings = {}
@@ -45,6 +46,7 @@ def main():
     with open(settings_file, 'w') as f:
         json.dump(settings, f, indent=2)
         f.write('\n')
+    settings_file.chmod(0o600)
 
     print(f'✅ Claude Code configured to use proxy at http://localhost:{port}')
     print(f'   Settings: {settings_file}')
