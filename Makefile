@@ -47,7 +47,7 @@ print('   LITELLM_MASTER_KEY stored in .env'); \
 start:
 	@echo "Starting LiteLLM → GitHub Copilot proxy on port $(PORT)..."
 	@if [ ! -f .env ]; then echo "❌ .env not found. Run 'make setup' first."; exit 1; fi
-	@set -a && source .env && set +a && \
+	@set -a && . ./.env && set +a && \
 	UV_NATIVE_TLS=true uv run \
 		--with "litellm[proxy]" \
 		litellm --config litellm_config.yaml --port $(PORT)
