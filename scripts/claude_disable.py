@@ -38,6 +38,7 @@ def main():
             with open(settings_file, 'w') as f:
                 json.dump(settings, f, indent=2)
                 f.write('\n')
+            settings_file.chmod(0o600)
             print('✅ Proxy configuration removed.')
             print('   Claude Code will now use Anthropic API directly.')
         else:
