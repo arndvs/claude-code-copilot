@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PORT="${LITELLM_PORT:-4000}"
-
 # Load .env if present
 if [[ -f .env ]]; then
   set -a
   source .env
   set +a
 fi
+
+PORT="${LITELLM_PORT:-4000}"
 
 if [[ -z "${LITELLM_MASTER_KEY:-}" ]]; then
   echo "❌ LITELLM_MASTER_KEY not set. Run 'make setup' or create .env first."
