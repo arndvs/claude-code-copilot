@@ -6,7 +6,7 @@ services:
     env_file: .env
     environment:
       - LITELLM_LOCAL_MODEL_COST_MAP=true
-      - DATABASE_URL=postgresql://litellm:litellm@db:5432/litellm
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-litellm}:${POSTGRES_PASSWORD:-litellm}@db:5432/${POSTGRES_DB:-litellm}
     volumes:
       # Mount cached GitHub Copilot OAuth token
       - ${HOME}/.config/litellm:/root/.config/litellm:ro
@@ -20,12 +20,13 @@ services:
       timeout: 5s
       retries: 3
 
+  # Postgres — local development only. Override credentials in .env for production.
   db:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: litellm
-      POSTGRES_USER: litellm
-      POSTGRES_PASSWORD: litellm
+      POSTGRES_DB: ${POSTGRES_DB:-litellm}
+      POSTGRES_USER: ${POSTGRES_USER:-litellm}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-litellm}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
