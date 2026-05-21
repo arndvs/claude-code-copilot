@@ -128,7 +128,7 @@ claude --model gpt-4o
 
 ```bash
 source .env
-curl -X POST http://localhost:4000/v1/messages \
+curl -X POST http://localhost:${LITELLM_PORT:-4000}/v1/messages \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -151,7 +151,7 @@ make start
 docker build -t claude-code-copilot .
 docker run --env-file .env \
   -v "$HOME/.config/litellm/github_copilot:/root/.config/litellm/github_copilot:ro" \
-  -p 4000:4000 \
+  -p "${LITELLM_PORT:-4000}:4000" \
   claude-code-copilot
 ```
 
@@ -165,7 +165,7 @@ docker compose up --build
 
 ## Autonomous agent loops (AFK mode)
 
-This proxy works with autonomous coding agents like [Sandcastle](https://github.com/mattpocock/sandcastle) or similar Claude Code wrappers.
+This proxy works with autonomous coding agents like [ctrlshft](https://github.com/arndvs/ctrlshft) or [Sandcastle](https://github.com/mattpocock/sandcastle).
 
 ### Required
 
