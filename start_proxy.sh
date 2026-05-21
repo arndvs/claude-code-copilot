@@ -24,7 +24,7 @@ echo ""
 echo "  — or manually set these env vars:"
 echo ""
 echo "  ANTHROPIC_BASE_URL=http://localhost:${PORT}"
-echo "  ANTHROPIC_AUTH_TOKEN=${LITELLM_MASTER_KEY}"
+echo "  ANTHROPIC_AUTH_TOKEN=<set to your LITELLM_MASTER_KEY>"
 echo "  CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1"
 echo ""
 
