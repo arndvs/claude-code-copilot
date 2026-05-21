@@ -108,14 +108,17 @@ claude-status:
 	@if [ -f ~/.claude/settings.json ]; then \
 		cat ~/.claude/settings.json | python3 -m json.tool 2>/dev/null || cat ~/.claude/settings.json; \
 		echo ""; \
-		PORT=$$(grep LITELLM_PORT .env 2>/dev/null | cut -d'=' -f2 | tr -d '"' || echo '$(PORT)'); \
-		PORT=$${PORT:-$(PORT)}; \
 		if grep -q "ANTHROPIC_BASE_URL" ~/.claude/settings.json 2>/dev/null; then \
 			echo "🔗 Routing: local proxy"; \
-			if curl -sf http://localhost:$$PORT/health/readiness >/dev/null 2>&1; then \
-				echo "✅ Proxy: running on port $$PORT"; \
+			PROXY_URL=$$(python3 -c "import json; print(json.load(open('$$HOME/.claude/settings.json')).get('env',{}).get('ANTHROPIC_BASE_URL',''))" 2>/dev/null); \
+			if [ -z "$$PROXY_URL" ]; then \
+				PORT=$$(grep LITELLM_PORT .env 2>/dev/null | cut -d'=' -f2 | tr -d '"' || echo '$(PORT)'); \
+				PROXY_URL="http://localhost:$${PORT:-$(PORT)}"; \
+			fi; \
+			if curl -sf "$$PROXY_URL/health/readiness" >/dev/null 2>&1; then \
+				echo "✅ Proxy: running at $$PROXY_URL"; \
 			else \
-				echo "❌ Proxy: not running — run 'make start'"; \
+				echo "❌ Proxy: not running at $$PROXY_URL — run 'make start'"; \
 			fi; \
 		else \
 			echo "🌐 Routing: Anthropic API directly"; \

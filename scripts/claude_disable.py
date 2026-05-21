@@ -6,7 +6,9 @@ Restores direct Anthropic API access without touching other settings.
 Usage: python3 scripts/claude_disable.py
 """
 import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 def main():
@@ -35,9 +37,17 @@ def main():
                 settings['env'] = env
             else:
                 del settings['env']
-            with open(settings_file, 'w') as f:
-                json.dump(settings, f, indent=2)
-                f.write('\n')
+            fd, tmp_path = tempfile.mkstemp(
+                dir=str(settings_file.parent), suffix='.tmp', prefix='settings_'
+            )
+            try:
+                with os.fdopen(fd, 'w') as f:
+                    json.dump(settings, f, indent=2)
+                    f.write('\n')
+                os.replace(tmp_path, str(settings_file))
+            except BaseException:
+                os.unlink(tmp_path)
+                raise
             settings_file.chmod(0o600)
             print('✅ Proxy configuration removed.')
             print('   Claude Code will now use Anthropic API directly.')
