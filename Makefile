@@ -4,7 +4,7 @@ PORT ?= 4000
 
 help:
 	@echo ""
-	@echo "copilot-claude-code-proxy"
+	@echo "claude-code-copilot"
 	@echo "─────────────────────────────────────────"
 	@echo "  make setup               Set up .env with generated keys"
 	@echo "  make start               Start LiteLLM proxy (OAuth on first run)"
@@ -33,6 +33,7 @@ open('.env','w').write('LITELLM_MASTER_KEY=' + mk + '\nLITELLM_PORT=$(PORT)\nLIT
 print('✅ .env created'); \
 print('   LITELLM_MASTER_KEY stored in .env'); \
 "; \
+		chmod 600 .env; \
 	else \
 		echo "✅ .env already exists — skipping"; \
 	fi
@@ -75,14 +76,16 @@ test:
 
 claude-enable:
 	@if [ ! -f .env ]; then echo "❌ .env not found. Run 'make setup' first."; exit 1; fi
-	@MASTER_KEY=$$(grep LITELLM_MASTER_KEY .env | cut -d'=' -f2 | tr -d '"'); \
+	@set -a && . ./.env && set +a && \
+	PORT=$${LITELLM_PORT:-$(PORT)} && \
+	MASTER_KEY=$$LITELLM_MASTER_KEY && \
 	if [ -z "$$MASTER_KEY" ]; then echo "❌ LITELLM_MASTER_KEY not found in .env"; exit 1; fi; \
 	if [ -f ~/.claude/settings.json ]; then \
 		BACKUP=~/.claude/settings.json.backup.$$(date +%Y%m%d_%H%M%S); \
 		cp ~/.claude/settings.json $$BACKUP; \
 		echo "📁 Backed up settings to $$BACKUP"; \
 	fi; \
-	python3 scripts/claude_enable.py "$$MASTER_KEY" "$(PORT)"
+	python3 scripts/claude_enable.py "$$MASTER_KEY" "$$PORT"
 
 claude-disable:
 	@if [ -f ~/.claude/settings.json ]; then \
@@ -101,7 +104,7 @@ claude-status:
 		echo ""; \
 		PORT=$$(grep LITELLM_PORT .env 2>/dev/null | cut -d'=' -f2 | tr -d '"' || echo '$(PORT)'); \
 		PORT=$${PORT:-$(PORT)}; \
-		if grep -q "localhost:" ~/.claude/settings.json 2>/dev/null; then \
+		if grep -q "ANTHROPIC_BASE_URL" ~/.claude/settings.json 2>/dev/null; then \
 			echo "🔗 Routing: local proxy"; \
 			if curl -sf http://localhost:$$PORT/health/readiness >/dev/null 2>&1; then \
 				echo "✅ Proxy: running on port $$PORT"; \
