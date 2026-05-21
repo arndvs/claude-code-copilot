@@ -29,8 +29,26 @@ def main():
         try:
             with open(settings_file) as f:
                 settings = json.load(f)
-        except (json.JSONDecodeError, IOError):
-            settings = {}
+        except json.JSONDecodeError as e:
+            print(
+                f"❌ {settings_file} contains invalid JSON: {e}",
+                file=sys.stderr,
+            )
+            print(
+                "Please fix or remove the file and run claude_enable.py again.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        except OSError as e:
+            print(
+                f"❌ Could not read {settings_file}: {e}",
+                file=sys.stderr,
+            )
+            print(
+                "Please fix the file permissions or remove the file and try again.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
     # Inject proxy env vars — merges into existing env dict
     settings.setdefault('$schema', 'https://json.schemastore.org/claude-code-settings.json')
