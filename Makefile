@@ -50,7 +50,7 @@ start:
 	@set -a && . ./.env && set +a && \
 	PORT=$${LITELLM_PORT:-$(PORT)} && \
 	echo "Starting LiteLLM → GitHub Copilot proxy on port $$PORT..." && \
-	UV_NATIVE_TLS=true uv run \
+	UV_NATIVE_TLS=$${UV_NATIVE_TLS:-true} uv run \
 		--with "litellm[proxy]" \
 		litellm --config litellm_config.yaml --port $$PORT
 
