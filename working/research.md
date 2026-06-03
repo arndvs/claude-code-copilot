@@ -1,5 +1,9 @@
 # Research: Claude Code ↔ GitHub Copilot Proxy
 
+> **⚠️ Historical document** — Written during initial audit (2026-05-20) before
+> scaffolding was completed. Many issues described below (wrong config, missing
+> files, script paths) have since been resolved. Kept for reference.
+
 Generated: 2026-05-20
 Topic: Deep audit of claude-code-copilot repo, comparison with reference implementations, shft integration path
 
