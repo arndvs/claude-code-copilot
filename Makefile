@@ -26,6 +26,7 @@ help:
 setup:
 	@if [ ! -f .env ]; then \
 		echo "Generating .env..."; \
+		umask 077; \
 		python3 -c "\
 import uuid; \
 mk = 'sk-' + str(uuid.uuid4()); \
@@ -34,6 +35,7 @@ print('✅ .env created'); \
 print('   LITELLM_MASTER_KEY stored in .env'); \
 "; \
 		chmod 600 .env; \
+
 	else \
 		echo "✅ .env already exists — skipping"; \
 	fi
