@@ -1,0 +1,67 @@
+litellm_settings:
+  drop_params: true
+  set_verbose: true
+  num_retries: 0
+  request_timeout: 120
+  additional_drop_params: ["response_format", "thinking"]
+
+model_list:
+  # Claude Code sends hyphenated names; Copilot uses dotted names.
+
+  # Sonnet 4.6 — Claude Code's default model
+  - model_name: "claude-sonnet-4-6"
+    litellm_params:
+      model: "github_copilot/claude-sonnet-4.6"
+      stream: false
+      extra_headers:
+        Editor-Version: "vscode/1.106.3"
+        Editor-Plugin-Version: "copilot/1.388.0"
+        Copilot-Integration-Id: "vscode-chat"
+        User-Agent: "GithubCopilot/1.388.0"
+
+  # Haiku — Copilot doesn't have Haiku; route to Sonnet as fallback
+  - model_name: "claude-haiku-4-5-20251001"
+    litellm_params:
+      model: "github_copilot/claude-sonnet-4.6"
+      stream: false
+      extra_headers:
+        Editor-Version: "vscode/1.106.3"
+        Editor-Plugin-Version: "copilot/1.388.0"
+        Copilot-Integration-Id: "vscode-chat"
+        User-Agent: "GithubCopilot/1.388.0"
+
+  # Opus 4.6
+  - model_name: "claude-opus-4-6"
+    litellm_params:
+      model: "github_copilot/claude-opus-4.6"
+      stream: false
+      extra_headers:
+        Editor-Version: "vscode/1.106.3"
+        Editor-Plugin-Version: "copilot/1.388.0"
+        Copilot-Integration-Id: "vscode-chat"
+        User-Agent: "GithubCopilot/1.388.0"
+
+  # Opus 4.7
+  - model_name: "claude-opus-4-7"
+    litellm_params:
+      model: "github_copilot/claude-opus-4.7"
+      stream: false
+      extra_headers:
+        Editor-Version: "vscode/1.106.3"
+        Editor-Plugin-Version: "copilot/1.388.0"
+        Copilot-Integration-Id: "vscode-chat"
+        User-Agent: "GithubCopilot/1.388.0"
+
+  # Wildcard fallback
+  - model_name: "*"
+    litellm_params:
+      model: "github_copilot/*"
+      stream: false
+      extra_headers:
+        Editor-Version: "vscode/1.106.3"
+        Editor-Plugin-Version: "copilot/1.388.0"
+        Copilot-Integration-Id: "vscode-chat"
+        User-Agent: "GithubCopilot/1.388.0"
+
+general_settings:
+  master_key: "os.environ/LITELLM_MASTER_KEY"
