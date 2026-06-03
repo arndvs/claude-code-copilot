@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Resolve script directory so .env and config are found regardless of cwd
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
 # Load .env if present
-if [[ -f .env ]]; then
+if [[ -f "$SCRIPT_DIR/.env" ]]; then
   set -a
-  source .env
+  source "$SCRIPT_DIR/.env"
   set +a
 fi
 
@@ -30,4 +33,4 @@ echo ""
 
 UV_NATIVE_TLS="${UV_NATIVE_TLS:-true}" exec uv run \
   --with "litellm[proxy]" \
-  litellm --config litellm_config.yaml --port "${PORT}"
+  litellm --config "$SCRIPT_DIR/litellm_config.yaml" --port "${PORT}"
