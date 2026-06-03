@@ -269,9 +269,10 @@ make start           # restart
 
 ### SSL errors (corporate proxy)
 
-`UV_NATIVE_TLS=true` is already set in `start_proxy.sh`. If still failing, add to `litellm_config.yaml`:
+`UV_NATIVE_TLS=true` is already set in `start_proxy.sh`. If you still see TLS errors, prefer installing/updating your system CA certificates or setting `SSL_CERT_FILE` / `REQUESTS_CA_BUNDLE` to your corporate CA bundle. As a last resort for local testing only (insecure), you can disable verification in `litellm_config.yaml`:
 
 ```yaml
+# ⚠️ Insecure — local testing only
 litellm_settings:
   ssl_verify: false
 ```
