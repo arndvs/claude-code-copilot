@@ -58,10 +58,10 @@ curl -sf -H "Authorization: Bearer $GITHUB_TOKEN" \
     + "      model: github_copilot/" + .id + "\n"
     + "      drop_params: true\n"
     + "      extra_headers:\n"
-    + "        editor-version: \"vscode/1.85.1\"\n"
-    + "        editor-plugin-version: \"copilot/1.155.0\"\n"
+    + "        Editor-Version: \"vscode/1.106.3\"\n"
+    + "        Editor-Plugin-Version: \"copilot/1.388.0\"\n"
     + "        Copilot-Integration-Id: \"vscode-chat\"\n"
-    + "        user-agent: \"GithubCopilot/1.155.0\"\n"
+    + "        User-Agent: \"GithubCopilot/1.388.0\"\n"
     + "    # " + .name + " (" + .vendor + ")"
     + " — state: " + (.policy.state // "enabled")
     + " | max output: " + (.capabilities.limits.max_output_tokens | tostring) + " tokens"
