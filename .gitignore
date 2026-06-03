@@ -26,4 +26,4 @@ Thumbs.db
 litellm.db
 
 # Reference repos (third-party, not distributed)
-references/
+/working/
