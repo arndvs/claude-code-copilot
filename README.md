@@ -6,6 +6,31 @@ Route Claude Code through your GitHub Copilot subscription via a local LiteLLM p
 Claude Code → LiteLLM proxy (localhost:4000) → GitHub Copilot API
 ```
 
+## Why this exists
+
+GitHub Copilot subscriptions include access to Claude, GPT-4o, and other models — but only through GitHub's API. Claude Code expects the Anthropic Messages API. This proxy bridges that gap: it accepts Anthropic-format requests and translates them to GitHub Copilot's API, letting you run Claude Code against your existing Copilot subscription without paying for a separate Anthropic API key.
+
+This is the **infrastructure layer** for [ctrlshft](https://github.com/arndvs/ctrlshft) — a dotfiles-based operating system for autonomous AI coding agents. The `shft` CLI manages this proxy as a daemon, injecting `ANTHROPIC_BASE_URL` into every Claude session (interactive and autonomous) so all model requests route through Copilot.
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  ctrlshft (orchestration)                               │
+│  ├── shft proxy start/stop/status                       │
+│  ├── _proxy_env.sh → exports ANTHROPIC_BASE_URL        │
+│  └── afk.sh / once.sh → autonomous agent loops         │
+├─────────────────────────────────────────────────────────┤
+│  claude-code-copilot (this repo — the proxy)            │
+│  ├── LiteLLM translates Anthropic API → Copilot API    │
+│  ├── OAuth token cached, model names mapped             │
+│  └── Wildcard routing — any model forwarded             │
+├─────────────────────────────────────────────────────────┤
+│  GitHub Copilot API                                     │
+│  └── Claude, GPT-4o, Gemini via your subscription      │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Standalone use works too** — you don't need ctrlshft. The Makefile provides the full workflow: `make setup && make claude-enable && make start`.
+
 > **Compliance note:** This is an unofficial local-proxy workaround, not a GitHub-promoted workflow. Review the [GitHub Copilot Terms of Service](https://docs.github.com/en/site-policy/github-terms/github-terms-for-additional-products-and-features#github-copilot) and usage limits before using in production.
 
 Inspired by [kjetiljd/claude-code-over-github-copilot](https://github.com/kjetiljd/claude-code-over-github-copilot) and [NationalBankBelgium/litellm-claude-code-proxy](https://github.com/NationalBankBelgium/litellm-claude-code-proxy).
@@ -165,12 +190,28 @@ docker compose up --build
 
 ## Autonomous agent loops (AFK mode)
 
-This proxy works with autonomous coding agents like [ctrlshft](https://github.com/arndvs/ctrlshft) or [Sandcastle](https://github.com/mattpocock/sandcastle).
-
-### Required
+This proxy is built for autonomous coding agents. The primary consumer is [ctrlshft](https://github.com/arndvs/ctrlshft), which manages the proxy lifecycle via the `shft` CLI:
 
 ```bash
-# Extended thinking not supported by Copilot provider
+# ctrlshft integration (if using shft CLI)
+shft proxy init ~/dev/ops/claude-code-copilot   # register proxy directory
+shft proxy on                                    # enable proxy routing
+shft proxy start                                 # launch daemon
+shft proxy status                                # check health + PID
+
+# The proxy env is injected automatically into all sessions:
+# afk.sh and once.sh source _proxy_env.sh before invoking Claude
+```
+
+Also compatible with [Sandcastle](https://github.com/mattpocock/sandcastle) or any tool that respects `ANTHROPIC_BASE_URL`.
+
+### Standalone autonomous use
+
+If not using ctrlshft, set the env manually:
+
+```bash
+export ANTHROPIC_BASE_URL=http://localhost:4000
+export ANTHROPIC_AUTH_TOKEN=<your-LITELLM_MASTER_KEY>
 export CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1
 ```
 
@@ -245,6 +286,7 @@ litellm_settings:
 
 ## Related
 
+- [ctrlshft](https://github.com/arndvs/ctrlshft) — dotfiles for AI coding agents; manages this proxy as infrastructure
 - [kjetiljd/claude-code-over-github-copilot](https://github.com/kjetiljd/claude-code-over-github-copilot) — original inspiration
 - [NationalBankBelgium/litellm-claude-code-proxy](https://github.com/NationalBankBelgium/litellm-claude-code-proxy) — same pattern for Azure AI Foundry
 - [LiteLLM GitHub Copilot provider](https://docs.litellm.ai/docs/providers/github_copilot)
