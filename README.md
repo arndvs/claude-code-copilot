@@ -242,7 +242,7 @@ model_list:
   #     api_version: "os.environ/AZURE_OPENAI_API_VERSION"
 ```
 
-LiteLLM automatically falls back to the next entry when Copilot rate limits are hit.
+**Note:** Multiple `model_list` entries alone do not enable automatic fallback. LiteLLM requires explicit [`fallbacks:` router configuration](https://docs.litellm.ai/docs/routing#fallbacks) to retry on a different deployment when Copilot rate limits are hit.
 
 ---
 

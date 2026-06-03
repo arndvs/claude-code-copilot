@@ -89,6 +89,7 @@ claude-enable:
 	if [ -f ~/.claude/settings.json ]; then \
 		BACKUP=~/.claude/settings.json.backup.$$(date +%Y%m%d_%H%M%S); \
 		cp ~/.claude/settings.json $$BACKUP; \
+		chmod 600 $$BACKUP; \
 		echo "📁 Backed up settings to $$BACKUP"; \
 	fi; \
 	python3 scripts/claude_enable.py "$$MASTER_KEY" "$$PORT"
@@ -97,6 +98,7 @@ claude-disable:
 	@if [ -f ~/.claude/settings.json ]; then \
 		BACKUP=~/.claude/settings.json.proxy_backup.$$(date +%Y%m%d_%H%M%S); \
 		cp ~/.claude/settings.json $$BACKUP; \
+		chmod 600 $$BACKUP; \
 		echo "📁 Backed up current settings to $$BACKUP"; \
 	fi
 	@python3 scripts/claude_disable.py
@@ -106,7 +108,7 @@ claude-status:
 	@echo "Claude Code configuration"
 	@echo "─────────────────────────────────────────"
 	@if [ -f ~/.claude/settings.json ]; then \
-		cat ~/.claude/settings.json | python3 -m json.tool 2>/dev/null || cat ~/.claude/settings.json; \
+		python3 -c "import json,sys; d=json.load(open('$$HOME/.claude/settings.json')); e=d.get('env',{}); [e.__setitem__(k,'<redacted>') for k in ('ANTHROPIC_AUTH_TOKEN',) if k in e]; json.dump(d,sys.stdout,indent=2); print()" 2>/dev/null || echo '(could not parse settings)'; \
 		echo ""; \
 		if grep -q "ANTHROPIC_BASE_URL" ~/.claude/settings.json 2>/dev/null; then \
 			echo "🔗 Routing: local proxy"; \
