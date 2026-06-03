@@ -64,7 +64,7 @@ stop:
 	@if [ ! -f .env ]; then echo "❌ .env not found. Run 'make setup' first."; exit 1; fi
 	@set -a && . ./.env && set +a && \
 	PORT=$${LITELLM_PORT:-$(PORT)} && \
-	pkill -f "litellm .*--port $$PORT" 2>/dev/null && echo "✅ Proxy stopped" || echo "ℹ️  No proxy process found"
+	pkill -f "litellm --config .*litellm_config.yaml --port $$PORT" 2>/dev/null && echo "✅ Proxy stopped" || echo "ℹ️  No proxy process found"
 
 # ── Test ───────────────────────────────────────────────────────
 
