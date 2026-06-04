@@ -44,10 +44,12 @@ cat > "$FAKE_HOME/.claude/settings.json" <<'JSON'
     "ANTHROPIC_AUTH_TOKEN": "sk-super-secret-token",
     "LITELLM_MASTER_KEY": "sk-another-secret",
     "GITHUB_AUTH": "gh-auth-secret",
-    "AUTHOR": "octocat",
+    "AUTH_HEADER": "bearer-secret",
     "MY_PASSWORD": "hunter2",
     "MY_CREDENTIAL": "cred-value",
-    "ANTHROPIC_MODEL": "claude-sonnet-4-6"
+    "ANTHROPIC_MODEL": "claude-sonnet-4-6",
+    "AUTHOR": "Ada Lovelace",
+    "AUTHORITY_URL": "https://login.example.test"
   }
 }
 JSON
@@ -76,10 +78,14 @@ elif echo "$STATUS_OUTPUT" | grep -q "hunter2"; then
     fail "MY_PASSWORD was not redacted"
 elif echo "$STATUS_OUTPUT" | grep -q "cred-value"; then
     fail "MY_CREDENTIAL was not redacted"
-elif ! echo "$STATUS_OUTPUT" | grep -q "octocat"; then
-    fail "AUTHOR should remain visible but was removed"
+elif echo "$STATUS_OUTPUT" | grep -q "bearer-secret"; then
+    fail "AUTH_HEADER was not redacted"
 elif ! echo "$STATUS_OUTPUT" | grep -q "claude-sonnet-4-6"; then
     fail "ANTHROPIC_MODEL should remain visible but was removed"
+elif ! echo "$STATUS_OUTPUT" | grep -q "Ada Lovelace"; then
+    fail "AUTHOR should remain visible but was removed"
+elif ! echo "$STATUS_OUTPUT" | grep -q "https://login.example.test"; then
+    fail "AUTHORITY_URL should remain visible but was removed"
 else
     pass "All secret-like keys redacted; non-secret keys preserved"
 fi
