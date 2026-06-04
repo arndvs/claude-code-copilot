@@ -34,16 +34,9 @@ cat > "$FAKE_HOME/.claude/settings.json" <<'JSON'
 }
 JSON
 
-# Extract the python one-liner from the Makefile's claude-status target
-STATUS_OUTPUT=$(python3 -c "
-import json, sys, re
-d = json.load(sys.stdin)
-e = d.get('env', {})
-pat = re.compile(r'(TOKEN|KEY|SECRET|PASSWORD|CREDENTIAL|AUTH)', re.I)
-[e.__setitem__(k, '<redacted>') for k in list(e) if pat.search(k)]
-json.dump(d, sys.stdout, indent=2)
-print()
-" < "$FAKE_HOME/.claude/settings.json" 2>/dev/null)
+if ! STATUS_OUTPUT=$(HOME="$FAKE_HOME" make -s claude-status 2>/dev/null); then
+    fail "make claude-status failed for valid settings"
+fi
 
 if echo "$STATUS_OUTPUT" | grep -q "sk-super-secret-token"; then
     fail "ANTHROPIC_AUTH_TOKEN was not redacted"
@@ -65,14 +58,10 @@ FAKE_HOME2="$TMPDIR_ROOT/home1b"
 mkdir -p "$FAKE_HOME2/.claude"
 echo "NOT-JSON { secret: sk-leaked }" > "$FAKE_HOME2/.claude/settings.json"
 
-INVALID_OUTPUT=$(python3 -c "
-import json, sys
-try:
-    d = json.load(sys.stdin)
-except Exception:
-    print('(could not parse settings)')
-    sys.exit(0)
-" < "$FAKE_HOME2/.claude/settings.json" 2>/dev/null)
+if ! INVALID_OUTPUT=$(HOME="$FAKE_HOME2" make -s claude-status 2>/dev/null); then
+    fail "make claude-status failed for invalid settings"
+    INVALID_OUTPUT=""
+fi
 
 if echo "$INVALID_OUTPUT" | grep -q "sk-leaked"; then
     fail "Invalid JSON leaked file contents"
