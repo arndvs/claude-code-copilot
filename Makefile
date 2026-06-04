@@ -97,7 +97,7 @@ claude-enable:
 		chmod 600 $$BACKUP; \
 		echo "📁 Backed up settings to $$BACKUP"; \
 	fi; \
-	python3 scripts/claude_enable.py "$$MASTER_KEY" "$$PORT"
+	LITELLM_MASTER_KEY="$$MASTER_KEY" LITELLM_PORT="$$PORT" python3 scripts/claude_enable.py
 
 claude-disable:
 	@if [ -f ~/.claude/settings.json ]; then \
