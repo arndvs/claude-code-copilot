@@ -138,11 +138,24 @@ echo '{"data":[]}'
 STUB
 chmod +x "$STUB_DIR/curl"
 
+cat > "$STUB_DIR/jq" <<'STUB'
+#!/usr/bin/env bash
+# Consume stdin and exit successfully so the model-list script runs offline.
+cat >/dev/null
+STUB
+chmod +x "$STUB_DIR/jq"
+
 export CURL_LOG="$TMPDIR_ROOT/curl_args.log"
 : > "$CURL_LOG"
 
 # Run list-copilot-models.sh with stubbed curl and fake HOME
-HOME="$FAKE_HOME4" PATH="$STUB_DIR:$PATH" bash scripts/list-copilot-models.sh > /dev/null 2>&1 || true
+if ! HOME="$FAKE_HOME4" PATH="$STUB_DIR:$PATH" bash scripts/list-copilot-models.sh > /dev/null 2>&1; then
+    fail "list-copilot-models.sh failed with stubbed dependencies"
+fi
+
+if [[ ! -s "$CURL_LOG" ]]; then
+    fail "list-copilot-models.sh did not invoke curl"
+fi
 
 if grep -q "$FAKE_TOKEN" "$CURL_LOG"; then
     fail "Copilot token appeared in curl argv"
