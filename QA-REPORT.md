@@ -12,7 +12,7 @@
 | 1 | Full diff contains no accidental routing/model changes | PASS |
 | 2 | Python compile checks pass | PASS |
 | 3 | Bash syntax checks pass | PASS |
-| 4 | Security regression script passes (5/5 tests) | PASS |
+| 4 | Security regression script passes (6/6 tests) | PASS |
 | 5 | `git diff --check` passes | PASS |
 | 6 | No command output contains real `.env` values | PASS |
 | 7 | `claude-status` remains useful while redacting secrets | PASS |
@@ -42,7 +42,9 @@ Test 2: claude_enable.py reads master key from env
   PASS: claude_enable.py fails with clear error when key missing
 Test 3: Copilot token not exposed in curl argv
   PASS: Copilot token not present in curl command-line arguments
-Results: 5 passed, 0 failed
+Test 3b: Empty Copilot token fails before curl
+  PASS: Empty Copilot token file fails before curl is invoked
+Results: 6 passed, 0 failed
 ```
 
 ### 5. git diff --check
