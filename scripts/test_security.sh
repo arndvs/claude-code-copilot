@@ -17,6 +17,73 @@ trap cleanup EXIT
 pass() { PASS=$((PASS + 1)); echo "  ✅ $1"; }
 fail() { FAIL=$((FAIL + 1)); echo "  ❌ $1"; }
 
+run_claude_status() {
+    local fake_home="$1"
+
+    if command -v make >/dev/null 2>&1; then
+        HOME="$fake_home" PATH="$STATUS_STUB_DIR:$PATH" make -s claude-status
+        return
+    fi
+
+    # Some Windows Git Bash installs do not include make. In that case, extract
+    # and execute the redaction command from the checked-in Makefile target so
+    # this test still tracks the implementation instead of copying it.
+    HOME="$fake_home" PATH="$STATUS_STUB_DIR:$PATH" python3 - <<'PY'
+import os
+import re
+import subprocess
+import sys
+
+in_target = False
+redaction_code = None
+
+with open("Makefile", encoding="utf-8") as makefile:
+    for raw_line in makefile:
+        if not in_target:
+            if raw_line.startswith("claude-status:"):
+                in_target = True
+            continue
+
+        if raw_line.startswith("\t"):
+            line = raw_line[1:].rstrip("\n")
+            match = re.search(r'python3 -c "(.*)" < ~/', line)
+            if match:
+                redaction_code = match.group(1)
+                break
+            continue
+
+        if raw_line.strip() == "":
+            break
+
+        break
+
+if redaction_code is None:
+    print("claude-status redaction command not found in Makefile", file=sys.stderr)
+    sys.exit(1)
+
+settings_file = os.path.join(os.environ["HOME"], ".claude", "settings.json")
+try:
+    with open(settings_file, encoding="utf-8") as settings:
+        settings_json = settings.read()
+except FileNotFoundError:
+    print("No settings file — using Claude Code defaults (Anthropic direct)")
+    sys.exit(0)
+
+result = subprocess.run(
+    [sys.executable, "-c", redaction_code],
+    input=settings_json,
+    env=os.environ,
+    text=True,
+    capture_output=True,
+    check=False,
+)
+if result.returncode == 0:
+    sys.stdout.write(result.stdout)
+else:
+    print("(could not parse settings)")
+PY
+}
+
 # ── Test 1: claude-status redacts secret-like env vars ─────────
 echo "Test 1: claude-status redacts secret-like env vars"
 
@@ -29,13 +96,23 @@ cat > "$FAKE_HOME/.claude/settings.json" <<'JSON'
     "LITELLM_MASTER_KEY": "sk-another-secret",
     "MY_PASSWORD": "hunter2",
     "MY_CREDENTIAL": "cred-value",
-    "ANTHROPIC_BASE_URL": "http://localhost:4000"
+    "ANTHROPIC_MODEL": "claude-sonnet-4-6"
   }
 }
 JSON
 
-if ! STATUS_OUTPUT=$(HOME="$FAKE_HOME" make -s claude-status 2>/dev/null); then
-    fail "make claude-status failed for valid settings"
+# Exercise the real Makefile target with a fake HOME. Stub curl so the proxy
+# health check cannot make a network request while preserving target behavior.
+STATUS_STUB_DIR="$TMPDIR_ROOT/status-stubs"
+mkdir -p "$STATUS_STUB_DIR"
+cat > "$STATUS_STUB_DIR/curl" <<'STUB'
+#!/usr/bin/env bash
+exit 22
+STUB
+chmod +x "$STATUS_STUB_DIR/curl"
+
+if ! STATUS_OUTPUT=$(run_claude_status "$FAKE_HOME" 2>/dev/null); then
+    fail "claude-status failed for valid settings"
 fi
 
 if echo "$STATUS_OUTPUT" | grep -q "sk-super-secret-token"; then
@@ -46,8 +123,8 @@ elif echo "$STATUS_OUTPUT" | grep -q "hunter2"; then
     fail "MY_PASSWORD was not redacted"
 elif echo "$STATUS_OUTPUT" | grep -q "cred-value"; then
     fail "MY_CREDENTIAL was not redacted"
-elif ! echo "$STATUS_OUTPUT" | grep -q "http://localhost:4000"; then
-    fail "ANTHROPIC_BASE_URL should remain visible but was removed"
+elif ! echo "$STATUS_OUTPUT" | grep -q "claude-sonnet-4-6"; then
+    fail "ANTHROPIC_MODEL should remain visible but was removed"
 else
     pass "All secret-like keys redacted; non-secret keys preserved"
 fi
@@ -58,8 +135,8 @@ FAKE_HOME2="$TMPDIR_ROOT/home1b"
 mkdir -p "$FAKE_HOME2/.claude"
 echo "NOT-JSON { secret: sk-leaked }" > "$FAKE_HOME2/.claude/settings.json"
 
-if ! INVALID_OUTPUT=$(HOME="$FAKE_HOME2" make -s claude-status 2>/dev/null); then
-    fail "make claude-status failed for invalid settings"
+if ! INVALID_OUTPUT=$(run_claude_status "$FAKE_HOME2" 2>/dev/null); then
+    fail "claude-status failed for invalid settings"
     INVALID_OUTPUT=""
 fi
 
