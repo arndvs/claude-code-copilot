@@ -1,6 +1,5 @@
 litellm_settings:
   drop_params: true
-  set_verbose: true
   num_retries: 0
   request_timeout: 120
   additional_drop_params: ["response_format", "thinking"]
