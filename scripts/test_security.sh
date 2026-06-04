@@ -43,6 +43,8 @@ cat > "$FAKE_HOME/.claude/settings.json" <<'JSON'
   "env": {
     "ANTHROPIC_AUTH_TOKEN": "sk-super-secret-token",
     "LITELLM_MASTER_KEY": "sk-another-secret",
+    "GITHUB_AUTH": "gh-auth-secret",
+    "AUTHOR": "octocat",
     "MY_PASSWORD": "hunter2",
     "MY_CREDENTIAL": "cred-value",
     "ANTHROPIC_MODEL": "claude-sonnet-4-6"
@@ -68,10 +70,14 @@ if echo "$STATUS_OUTPUT" | grep -q "sk-super-secret-token"; then
     fail "ANTHROPIC_AUTH_TOKEN was not redacted"
 elif echo "$STATUS_OUTPUT" | grep -q "sk-another-secret"; then
     fail "LITELLM_MASTER_KEY was not redacted"
+elif echo "$STATUS_OUTPUT" | grep -q "gh-auth-secret"; then
+    fail "GITHUB_AUTH was not redacted"
 elif echo "$STATUS_OUTPUT" | grep -q "hunter2"; then
     fail "MY_PASSWORD was not redacted"
 elif echo "$STATUS_OUTPUT" | grep -q "cred-value"; then
     fail "MY_CREDENTIAL was not redacted"
+elif ! echo "$STATUS_OUTPUT" | grep -q "octocat"; then
+    fail "AUTHOR should remain visible but was removed"
 elif ! echo "$STATUS_OUTPUT" | grep -q "claude-sonnet-4-6"; then
     fail "ANTHROPIC_MODEL should remain visible but was removed"
 else
