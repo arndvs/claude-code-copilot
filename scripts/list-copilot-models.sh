@@ -31,6 +31,14 @@ fi
 
 GITHUB_TOKEN=$(tr -d '\n\r ' < "$GITHUB_TOKEN_FILE")
 
+# Write auth header to a restricted temp file so the token never appears in
+# curl's argv (visible via /proc/*/cmdline or ps).
+CURL_CONFIG=$(mktemp "${TMPDIR:-/tmp}/copilot-curl-XXXXXX")
+chmod 600 "$CURL_CONFIG"
+cleanup() { rm -f "$CURL_CONFIG"; }
+trap cleanup EXIT
+printf 'header = "Authorization: Bearer %s"\n' "$GITHUB_TOKEN" > "$CURL_CONFIG"
+
 echo "# GitHub Copilot chat models — generated $(date)"
 echo "# Paste desired entries into litellm_config.yaml"
 echo "# The default wildcard config routes everything automatically —"
@@ -48,7 +56,7 @@ fi
 echo ""
 echo "model_list:"
 
-curl -sf -H "Authorization: Bearer $GITHUB_TOKEN" \
+curl -sf -K "$CURL_CONFIG" \
     https://api.githubcopilot.com/models \
 | jq -r '.data[]
     | select(.capabilities.type == "chat")
