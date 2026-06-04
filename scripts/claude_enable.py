@@ -3,7 +3,10 @@
 Enable the LiteLLM proxy in Claude Code settings.
 Writes proxy env vars to ~/.claude/settings.json without touching other settings.
 
-Usage: python3 scripts/claude_enable.py <master_key> [port]
+Reads LITELLM_MASTER_KEY from the environment (never from command-line arguments).
+Optional: LITELLM_PORT (default 4000).
+
+Usage: python3 scripts/claude_enable.py
 """
 import json
 import os
@@ -12,12 +15,16 @@ import tempfile
 from pathlib import Path
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: claude_enable.py <master_key> [port]")
+    master_key = os.environ.get('LITELLM_MASTER_KEY', '').strip()
+    if not master_key:
+        print(
+            "❌ LITELLM_MASTER_KEY is not set in the environment.\n"
+            "   Source your .env first: set -a && . ./.env && set +a",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
-    master_key = sys.argv[1]
-    port = sys.argv[2] if len(sys.argv) > 2 else "4000"
+    port = os.environ.get('LITELLM_PORT', '').strip() or "4000"
 
     claude_dir = Path.home() / '.claude'
     settings_file = claude_dir / 'settings.json'
