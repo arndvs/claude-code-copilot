@@ -54,7 +54,7 @@ No whitespace errors across all 7 security commits.
 Code review confirms:
 - `claude_enable.py` reads key from env, never prints it
 - `list-copilot-models.sh` writes token to chmod-600 temp file, not stdout
-- `claude-status` redacts all env vars matching `TOKEN|KEY|SECRET|PASSWORD|CREDENTIAL|AUTH`
+- `claude-status` redacts secret-like env vars with common credential suffixes (`TOKEN`, `KEY`, `SECRET`, `PASSWORD`, `CREDENTIAL`)
 
 ### 7. claude-status usefulness
 
