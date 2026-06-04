@@ -56,7 +56,7 @@ fi
 echo ""
 echo "model_list:"
 
-curl -sf -K "$CURL_CONFIG" \
+curl -qsf -K "$CURL_CONFIG" \
     https://api.githubcopilot.com/models \
 | jq -r '.data[]
     | select(.capabilities.type == "chat")

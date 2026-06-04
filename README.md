@@ -158,7 +158,7 @@ chmod 600 "$curl_config"
 trap 'rm -f "$curl_config"' EXIT
 printf 'header = "Authorization: Bearer %s"\n' "$LITELLM_MASTER_KEY" > "$curl_config"
 
-curl -X POST http://localhost:${LITELLM_PORT:-4000}/v1/messages \
+curl -q -X POST http://localhost:${LITELLM_PORT:-4000}/v1/messages \
   -K "$curl_config" \
   -H "Content-Type: application/json" \
   -d '{

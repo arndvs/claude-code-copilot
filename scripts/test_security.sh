@@ -25,63 +25,12 @@ run_claude_status() {
         return
     fi
 
-    # Some Windows Git Bash installs do not include make. In that case, extract
-    # and execute the redaction command from the checked-in Makefile target so
-    # this test still tracks the implementation instead of copying it.
-    HOME="$fake_home" PATH="$STATUS_STUB_DIR:$PATH" python3 - <<'PY'
-import os
-import re
-import subprocess
-import sys
-
-in_target = False
-redaction_code = None
-
-with open("Makefile", encoding="utf-8") as makefile:
-    for raw_line in makefile:
-        if not in_target:
-            if raw_line.startswith("claude-status:"):
-                in_target = True
-            continue
-
-        if raw_line.startswith("\t"):
-            line = raw_line[1:].rstrip("\n")
-            match = re.search(r'python3 -c "(.*)" < ~/', line)
-            if match:
-                redaction_code = match.group(1)
-                break
-            continue
-
-        if raw_line.strip() == "":
-            break
-
-        break
-
-if redaction_code is None:
-    print("claude-status redaction command not found in Makefile", file=sys.stderr)
-    sys.exit(1)
-
-settings_file = os.path.join(os.environ["HOME"], ".claude", "settings.json")
-try:
-    with open(settings_file, encoding="utf-8") as settings:
-        settings_json = settings.read()
-except FileNotFoundError:
-    print("No settings file — using Claude Code defaults (Anthropic direct)")
-    sys.exit(0)
-
-result = subprocess.run(
-    [sys.executable, "-c", redaction_code],
-    input=settings_json,
-    env=os.environ,
-    text=True,
-    capture_output=True,
-    check=False,
-)
-if result.returncode == 0:
-    sys.stdout.write(result.stdout)
-else:
-    print("(could not parse settings)")
-PY
+    # Some Windows Git Bash installs do not include make.
+    if [ -f "$fake_home/.claude/settings.json" ]; then
+        HOME="$fake_home" PATH="$STATUS_STUB_DIR:$PATH" python3 scripts/claude_status_redact.py < "$fake_home/.claude/settings.json" 2>/dev/null || echo '(could not parse settings)'
+    else
+        echo "No settings file — using Claude Code defaults (Anthropic direct)"
+    fi
 }
 
 # ── Test 1: claude-status redacts secret-like env vars ─────────
