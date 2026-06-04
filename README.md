@@ -153,7 +153,7 @@ claude --model gpt-4o
 
 ```bash
 . ./.env
-curl_config=$(mktemp)
+curl_config=$(mktemp "${TMPDIR:-/tmp}/litellm-curl-XXXXXX")
 chmod 600 "$curl_config"
 trap 'rm -f "$curl_config"' EXIT
 printf 'header = "Authorization: Bearer %s"\n' "$LITELLM_MASTER_KEY" > "$curl_config"

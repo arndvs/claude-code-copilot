@@ -190,6 +190,25 @@ else
     pass "Copilot token not present in curl command-line arguments"
 fi
 
+# ── Test 3b: Empty Copilot token fails before curl ─────────────
+echo "Test 3b: Empty Copilot token fails before curl"
+
+FAKE_HOME5="$TMPDIR_ROOT/home4"
+FAKE_EMPTY_TOKEN_DIR="$FAKE_HOME5/.config/litellm/github_copilot"
+mkdir -p "$FAKE_EMPTY_TOKEN_DIR"
+printf ' \n\r\t ' > "$FAKE_EMPTY_TOKEN_DIR/access-token"
+
+export CURL_LOG="$TMPDIR_ROOT/curl_empty_token_args.log"
+: > "$CURL_LOG"
+
+if HOME="$FAKE_HOME5" PATH="$STUB_DIR:$PATH" bash scripts/list-copilot-models.sh > /dev/null 2>&1; then
+    fail "list-copilot-models.sh should fail when the Copilot token file is empty"
+elif [[ -s "$CURL_LOG" ]]; then
+    fail "list-copilot-models.sh invoked curl with an empty Copilot token"
+else
+    pass "Empty Copilot token file fails before curl is invoked"
+fi
+
 # ── Summary ────────────────────────────────────────────────────
 echo ""
 echo "Results: $PASS passed, $FAIL failed"

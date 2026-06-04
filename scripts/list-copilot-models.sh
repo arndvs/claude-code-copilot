@@ -29,7 +29,11 @@ if [[ ! -f "$GITHUB_TOKEN_FILE" ]]; then
     exit 1
 fi
 
-GITHUB_TOKEN=$(tr -d '\n\r ' < "$GITHUB_TOKEN_FILE")
+GITHUB_TOKEN=$(tr -d '[:space:]' < "$GITHUB_TOKEN_FILE")
+if [[ -z "$GITHUB_TOKEN" ]]; then
+    echo "❌ GitHub Copilot token file is empty: $GITHUB_TOKEN_FILE" >&2
+    exit 1
+fi
 
 # Write auth header to a restricted temp file so the token never appears in
 # curl's argv (visible via /proc/*/cmdline or ps).
