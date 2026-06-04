@@ -77,7 +77,7 @@ All prerequisite issues have fix commits landed and verified:
 - #5 — Redact Claude status output broadly (commit `3425468`)
 - #6 — Master key via env instead of argv (commit `b020218`)
 - #7 — Copilot token via curl config file (commit `7f716da`)
-- #8 — Remove stale working/research.md (commit `8626e55`)
+- #8 — Remove stale research notes artifact (commit `8626e55`)
 - #9 — Security regression tests (commit `7f46b87`)
 - #10 — Docs updated for env-based behavior (commit `1b69a68`)
 - #11 — This QA report
