@@ -97,7 +97,7 @@ claude-enable:
 		chmod 600 $$BACKUP; \
 		echo "📁 Backed up settings to $$BACKUP"; \
 	fi; \
-	python3 scripts/claude_enable.py "$$MASTER_KEY" "$$PORT"
+	LITELLM_MASTER_KEY="$$MASTER_KEY" LITELLM_PORT="$$PORT" python3 scripts/claude_enable.py
 
 claude-disable:
 	@if [ -f ~/.claude/settings.json ]; then \
@@ -113,7 +113,7 @@ claude-status:
 	@echo "Claude Code configuration"
 	@echo "─────────────────────────────────────────"
 	@if [ -f ~/.claude/settings.json ]; then \
-		python3 -c "import json,sys; d=json.load(open('$$HOME/.claude/settings.json')); e=d.get('env',{}); [e.__setitem__(k,'<redacted>') for k in ('ANTHROPIC_AUTH_TOKEN',) if k in e]; json.dump(d,sys.stdout,indent=2); print()" 2>/dev/null || echo '(could not parse settings)'; \
+		python3 scripts/claude_status_redact.py < ~/.claude/settings.json 2>/dev/null || echo '(could not parse settings)'; \
 		echo ""; \
 		if grep -q "ANTHROPIC_BASE_URL" ~/.claude/settings.json 2>/dev/null; then \
 			echo "🔗 Routing: local proxy"; \

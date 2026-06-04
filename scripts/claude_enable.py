@@ -3,7 +3,11 @@
 Enable the LiteLLM proxy in Claude Code settings.
 Writes proxy env vars to ~/.claude/settings.json without touching other settings.
 
-Usage: python3 scripts/claude_enable.py <master_key> [port]
+Reads LITELLM_MASTER_KEY from the environment (never from command-line arguments).
+Optional: LITELLM_PORT (default 4000).
+Tests may set CLAUDE_SETTINGS_FILE to isolate writes from real user config.
+
+Usage: python3 scripts/claude_enable.py
 """
 import json
 import os
@@ -11,16 +15,28 @@ import sys
 import tempfile
 from pathlib import Path
 
+
+def resolve_settings_file():
+    override = os.environ.get('CLAUDE_SETTINGS_FILE', '').strip()
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / '.claude' / 'settings.json'
+
+
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: claude_enable.py <master_key> [port]")
+    master_key = os.environ.get('LITELLM_MASTER_KEY', '').strip()
+    if not master_key:
+        print(
+            "❌ LITELLM_MASTER_KEY is not set in the environment.\n"
+            "   Source your .env first: set -a && . ./.env && set +a",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
-    master_key = sys.argv[1]
-    port = sys.argv[2] if len(sys.argv) > 2 else "4000"
+    port = os.environ.get('LITELLM_PORT', '').strip() or "4000"
 
-    claude_dir = Path.home() / '.claude'
-    settings_file = claude_dir / 'settings.json'
+    settings_file = resolve_settings_file()
+    claude_dir = settings_file.parent
 
     claude_dir.mkdir(mode=0o700, exist_ok=True)
     claude_dir.chmod(0o700)
