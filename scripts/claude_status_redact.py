@@ -5,7 +5,7 @@ import sys
 
 data = json.load(sys.stdin)
 env = data.get("env", {})
-pattern = re.compile(r"(?:^|_)(?:TOKEN|KEY|SECRET|PASSWORD|CREDENTIAL)(?:$|_)", re.I)
+pattern = re.compile(r"(?:^|_)(?:TOKEN|KEY|SECRET|PASSWORD|CREDENTIAL|AUTH)(?:$|_)", re.I)
 for key in list(env):
     if pattern.search(key):
         env[key] = "<redacted>"
