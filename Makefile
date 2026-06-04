@@ -113,7 +113,7 @@ claude-status:
 	@echo "Claude Code configuration"
 	@echo "─────────────────────────────────────────"
 	@if [ -f ~/.claude/settings.json ]; then \
-		python3 -c "import json,sys; d=json.load(open('$$HOME/.claude/settings.json')); e=d.get('env',{}); [e.__setitem__(k,'<redacted>') for k in ('ANTHROPIC_AUTH_TOKEN',) if k in e]; json.dump(d,sys.stdout,indent=2); print()" 2>/dev/null || echo '(could not parse settings)'; \
+		python3 -c "import json,sys,re; d=json.load(sys.stdin); e=d.get('env',{}); pat=re.compile(r'(TOKEN|KEY|SECRET|PASSWORD|CREDENTIAL|AUTH)',re.I); [e.__setitem__(k,'<redacted>') for k in list(e) if pat.search(k)]; json.dump(d,sys.stdout,indent=2); print()" < ~/.claude/settings.json 2>/dev/null || echo '(could not parse settings)'; \
 		echo ""; \
 		if grep -q "ANTHROPIC_BASE_URL" ~/.claude/settings.json 2>/dev/null; then \
 			echo "🔗 Routing: local proxy"; \
