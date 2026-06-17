@@ -9,7 +9,7 @@ services:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-litellm}:${POSTGRES_PASSWORD:-litellm}@db:5432/${POSTGRES_DB:-litellm}
     volumes:
       # Mount cached GitHub Copilot OAuth token
-      - ${HOME}/.config/litellm/github_copilot:/root/.config/litellm/github_copilot:ro
+      - ${HOME}/.config/litellm/github_copilot:/root/.config/litellm/github_copilot:rw
     restart: unless-stopped
     depends_on:
       db:

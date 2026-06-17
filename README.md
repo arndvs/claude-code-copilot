@@ -33,9 +33,6 @@ This is the **infrastructure layer** for [ctrlshft](https://github.com/arndvs/ct
 
 **Standalone use works too** — you don't need ctrlshft. The Makefile provides the full workflow: `make setup && make claude-enable && make start`.
 
-> **Compliance note:** This is an unofficial proxy workaround, not a GitHub-promoted workflow. Review the [GitHub Copilot Terms of Service](https://docs.github.com/en/site-policy/github-terms/github-terms-for-additional-products-and-features#github-copilot) and usage limits before using in production.
-
-Inspired by [kjetiljd/claude-code-over-github-copilot](https://github.com/kjetiljd/claude-code-over-github-copilot) and [NationalBankBelgium/litellm-claude-code-proxy](https://github.com/NationalBankBelgium/litellm-claude-code-proxy).
 
 ---
 
@@ -64,7 +61,7 @@ make claude-enable
 make start
 ```
 
-**First run:** LiteLLM will print a GitHub device URL and code. Open the URL, paste the code, approve access. Token is cached at `~/.config/litellm/github_copilot` — you won't need to do this again.
+**First run:** LiteLLM will print a GitHub device URL and code. Open the URL, paste the code, approve access. The token is cached at `~/.config/litellm/github_copilot` and refreshed automatically; you only need to repeat this if the token is revoked or expires (see [Troubleshooting](#oauth-token-expired)).
 
 **In a separate terminal:**
 ```bash
@@ -135,7 +132,7 @@ Set `ANTHROPIC_BASE_URL` to your proxy endpoint (`http://localhost:4000` for loc
 
 ## Model selection
 
-The proxy uses a wildcard (`model_name: "*"`) — any model name Claude Code sends is forwarded to GitHub Copilot. Claude Code's default model selection works without changes.
+`litellm_config.yaml` defines explicit aliases for the common Claude Code model names (e.g. `claude-sonnet-4-6`, `claude-opus-4-7`) plus a `model_name: "*"` wildcard that forwards any other name straight to GitHub Copilot. Claude Code's default model selection works without changes.
 
 To see what models your Copilot plan supports:
 
@@ -151,6 +148,13 @@ claude --model claude-sonnet-4-6
 claude --model claude-opus-4-7
 claude --model gpt-4o
 ```
+
+> **Note:** not every model is reachable through this proxy. Models served only
+> via Copilot's Responses API (for example, GPT-5.x Codex variants) will reject
+> `/v1/messages` chat-completion calls. If a specific model is intermittently
+> unreliable on your plan, you can remap its alias to a more dependable model in
+> `litellm_config.yaml`. See
+> [docs/hosted_deployment.md](docs/hosted_deployment.md#model-selection-note).
 
 ---
 
@@ -186,14 +190,22 @@ make start
 # Run in Docker (mounts your cached token)
 docker build -t claude-code-copilot .
 docker run --env-file .env \
-  -v "$HOME/.config/litellm/github_copilot:/root/.config/litellm/github_copilot:ro" \
+  -v "$HOME/.config/litellm/github_copilot:/root/.config/litellm/github_copilot:rw" \
   -p "127.0.0.1:${LITELLM_PORT:-4000}:4000" \
   claude-code-copilot
 ```
 
+Mount the token directory read-write (`:rw`) — LiteLLM refreshes the Copilot
+token periodically and must write the new value back; a read-only mount causes
+requests to fail once the token needs refreshing.
+
 Bind the container port to `127.0.0.1` for production or shared hosts. The
 LiteLLM proxy should not be reachable directly from the internet; put Caddy,
 nginx, or another TLS reverse proxy in front of it and expose only `80/443`.
+
+> For a complete AWS EC2 walkthrough (provisioning, OAuth, Caddy TLS, key
+> rotation, ECR backup, and disaster recovery), see
+> [docs/hosted_deployment.md](docs/hosted_deployment.md).
 
 ### Docker Compose (with database for spend tracking)
 
@@ -326,7 +338,12 @@ litellm_settings:
 
 ## How it works
 
-`litellm_config.yaml` uses `model_name: "*"` — every model name Claude Code sends is forwarded to GitHub Copilot with the required editor headers that make requests appear to originate from VS Code. LiteLLM translates between Anthropic's `/v1/messages` format and GitHub Copilot's API.
+`litellm_config.yaml` defines explicit model aliases plus a `model_name: "*"`
+wildcard. Requests are forwarded to GitHub Copilot with the editor headers the
+Copilot API expects from an IDE client. LiteLLM translates between Anthropic's
+`/v1/messages` format and GitHub Copilot's API. (As noted above, this is an
+unofficial integration — review the Copilot Terms of Service before production
+use.)
 
 ---
 
