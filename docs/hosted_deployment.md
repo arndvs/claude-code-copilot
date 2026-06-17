@@ -1,0 +1,310 @@
+# Hosted Deployment (AWS EC2)
+
+A concrete, end-to-end walkthrough for running this proxy as a hosted HTTPS endpoint on a single AWS EC2 instance, fronted by Caddy for TLS. This is the worked example behind the README's [Production ingress checklist](https://claude.ai/README.md#production-ingress-checklist).
+
+For the general security model (localhost binding, bearer auth, no public proxy port), see that checklist — it is not repeated in full here.
+
+---
+
+## Architecture
+
+```
+Claude Code client → HTTPS :443 → Caddy (TLS) → 127.0.0.1:4000 → LiteLLM → GitHub Copilot
+
+```
+
+- One small EC2 instance runs two containers: the LiteLLM proxy (bound to localhost only) and Caddy (terminates TLS, forwards to the proxy).
+- Auth is enforced by LiteLLM via `LITELLM_MASTER_KEY`. Caddy does **not** add auth — the proxy is the gatekeeper.
+- The GitHub Copilot OAuth token is obtained once, on the host, and persisted to a writable mount so it survives restarts and refreshes.
+
+---
+
+## Prerequisites
+
+- An AWS account, a registered domain, and a GitHub Copilot subscription.
+- A subdomain you can point at the instance (e.g. `proxy.example.com`).
+- Familiarity with the README's [Production ingress checklist](https://claude.ai/README.md#production-ingress-checklist).
+
+---
+
+## 1. Provision the instance
+
+- **EC2:** a small instance (e.g. `t3.small`) running Ubuntu LTS. Attach an **encrypted** root volume of **at least 20 GiB** — Docker image builds are disk-heavy and an 8 GiB volume fills quickly across rebuilds.
+- **Elastic IP:** allocate and associate one so the public IP is stable across stop/start. Point your subdomain's DNS `A` record at it, and confirm it resolves before requesting a certificate (Caddy's ACME challenge depends on it).
+- **Security group:** follow the README ingress checklist — allow `443/tcp` (and `80/tcp` for ACME issuance / HTTP→HTTPS redirects); do **not** expose the proxy port (`4000`); prefer **no inbound SSH**.
+- **IAM instance role:** attach a role granting:
+  - `AmazonSSMManagedInstanceCore` — for Session Manager shell access (so you never open SSH).
+  - Scoped **read** of your proxy secret in Parameter Store, e.g. `ssm:GetParameter` / `ssm:GetParameters` on `arn:aws:ssm:<region>:<account>:parameter/<your-prefix>/*`.
+  - *(Optional)* scoped ECR push/pull if you back up the image (see §8).
+
+Use AWS Systems Manager **Session Manager** for all shell access instead of SSH. A freshly launched instance can take a few minutes (and sometimes a reboot) to register with SSM before the **Connect** button is available.
+
+---
+
+## 2. Install runtime and clone
+
+On the instance (via Session Manager, as root — `sudo su -`):
+
+```bash
+apt-get update && apt-get install -y ca-certificates curl gnupg git make
+# Install Docker Engine + Compose plugin using the official Docker apt repo
+# (see docs.docker.com for the current steps for your Ubuntu release).
+
+cd /opt
+git clone https://github.com/arndvs/claude-code-copilot
+cd claude-code-copilot
+
+```
+
+The AWS CLI is **not** installed on Ubuntu by default. If you want to read Parameter Store from the box, install AWS CLI v2 and verify the instance role:
+
+```bash
+cd /tmp
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
+unzip -o awscliv2.zip && ./aws/install      # use sudo if not root
+aws sts get-caller-identity --region <region>   # expect the instance role ARN
+
+```
+
+---
+
+## 3. Generate secrets
+
+```bash
+cd /opt/claude-code-copilot
+umask 077
+make setup            # generates .env with a random LITELLM_MASTER_KEY (sk-…)
+chmod 600 .env
+
+```
+
+> `make` **on minimal Ubuntu + dash:** some Make recipes assume `bash`. If `make setup` errors with a `dash` syntax error, generate `.env` by hand:
+>
+> ```bash
+> umask 077
+> python3 -c "import uuid; open('.env','w').write('LITELLM_MASTER_KEY=sk-'+str(uuid.uuid4())+'\nLITELLM_PORT=4000\nLITELLM_LOCAL_MODEL_COST_MAP=true\n')"
+> chmod 600 .env
+> curl -LsSf https://astral.sh/uv/install.sh | sh
+> export PATH="$HOME/.local/bin:$PATH"
+>
+> ```
+
+Store the master key in a managed secret store rather than leaving it only on disk. With AWS Parameter Store (run from **CloudShell** or anywhere with write access — the instance role is intentionally read-only):
+
+```bash
+aws ssm put-parameter \
+  --name "/<your-prefix>/auth-key" \
+  --value "sk-…" \
+  --type SecureString --overwrite --region <region>
+
+```
+
+The instance role can then read it back; the on-disk `.env` stays `chmod 600`.
+
+---
+
+## 4. Authenticate Copilot once, on the host
+
+**This must happen before containerizing.** The OAuth device-code flow needs a browser and writes a token cache that the container later mounts.
+
+```bash
+set -a && . ./.env && set +a
+UV_NATIVE_TLS=true uv run --with "litellm[proxy]" \
+  litellm --config litellm_config.yaml --port 4000
+
+```
+
+LiteLLM prints a GitHub device URL and code. Open the URL in a browser, enter the code, approve access. Once it starts serving, stop it with **Ctrl-C**. Confirm the token cached:
+
+```bash
+ls -la ~/.config/litellm/github_copilot   # expect access-token and api-key.json
+
+```
+
+If the token ever expires, delete that directory and repeat this step:
+
+```bash
+rm -rf ~/.config/litellm/github_copilot
+# then re-run the uv run command above
+
+```
+
+---
+
+## 5. Run the proxy container
+
+> **Mount the token read-write (**`:rw`**).** LiteLLM refreshes the Copilot token periodically and must write the new value back to `api-key.json`. A read-only (`:ro`) mount causes requests to start failing with a `Read-only file system … api-key.json` error once the token needs refreshing.
+
+```bash
+docker build -t claude-code-copilot-proxy:latest .
+
+docker run -d --name proxy --restart unless-stopped \
+  --env-file .env \
+  -v "$HOME/.config/litellm/github_copilot:/root/.config/litellm/github_copilot:rw" \
+  -p "127.0.0.1:4000:4000" \
+  claude-code-copilot-proxy:latest
+
+```
+
+Notes:
+
+- `-p 127.0.0.1:4000:4000` binds to **localhost only** — the proxy is never directly internet-reachable. Verify with `ss -tlnp | grep 4000` (expect `127.0.0.1:4000`, not `0.0.0.0:4000`).
+- `--restart unless-stopped` brings the container back automatically after a reboot or crash.
+- **Changing env vars (e.g. rotating the key) requires** `docker rm -f` **+ a fresh** `docker run`**, not** `docker restart` — a restart reuses the original environment and will keep serving the old key. See §7.
+- This single-container run intentionally omits the database. The Compose stack adds Postgres for spend tracking; if you use it, the proxy image must include the `prisma` package (this repo's Dockerfile installs it) or LiteLLM fails to initialize the DB layer.
+
+---
+
+## 6. Put Caddy in front for TLS
+
+```bash
+mkdir -p /opt/caddy/data /opt/caddy/config
+cat > /opt/caddy/Caddyfile <<'EOF'
+proxy.example.com {
+    reverse_proxy 127.0.0.1:4000
+}
+EOF
+
+docker run -d --name caddy --restart unless-stopped --network host \
+  -v /opt/caddy/Caddyfile:/etc/caddy/Caddyfile:ro \
+  -v /opt/caddy/data:/data \
+  -v /opt/caddy/config:/config \
+  caddy:latest
+
+```
+
+- `--network host` lets Caddy reach `127.0.0.1:4000` directly and bind `80/443` on the host.
+- The `/data` volume **persists the issued certificate** across restarts, which avoids re-issuance and Let's Encrypt rate limits.
+- With DNS pointing at the Elastic IP and `80/443` open, Caddy obtains a certificate automatically within seconds. Watch it with `docker logs caddy 2>&1 | tail -n 30` — look for `certificate obtained successfully`.
+
+---
+
+## 7. Verify
+
+Run the README ingress checks, plus end-to-end auth from an **external** machine (not the box):
+
+```bash
+# A) valid key → 200 with a completion
+curl -s -X POST https://proxy.example.com/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <LITELLM_MASTER_KEY>" \
+  -d '{"model":"claude-sonnet-4-6","max_tokens":20,"messages":[{"role":"user","content":"hi"}]}'
+
+# B) no key → 401 (auth enforced)
+curl -s -o /dev/null -w "%{http_code}\n" -X POST https://proxy.example.com/v1/messages \
+  -H "Content-Type: application/json" \
+  -d '{"model":"claude-sonnet-4-6","max_tokens":20,"messages":[{"role":"user","content":"hi"}]}'
+
+# C) raw proxy port from outside → connection refused / timeout (never exposed)
+curl -s -o /dev/null -w "%{http_code}\n" --max-time 8 http://proxy.example.com:4000/v1/messages
+
+```
+
+Expected: (A) a completion, (B) `401`, (C) a timeout/`000`.
+
+**Reboot-survival test:** reboot the instance, wait a few minutes, and re-run check (A) from your external machine. If it returns a completion with no manual intervention, the auto-restart chain (Docker → both containers → persisted cert → persisted token) is sound.
+
+---
+
+## 8. Operations
+
+### Rotate the master key
+
+```bash
+cd /opt/claude-code-copilot
+umask 077
+python3 -c "import uuid; open('.env','w').write('LITELLM_MASTER_KEY=sk-'+str(uuid.uuid4())+'\nLITELLM_PORT=4000\nLITELLM_LOCAL_MODEL_COST_MAP=true\n')"
+chmod 600 .env
+
+# Recreate (NOT restart) so the new key is picked up:
+docker rm -f proxy
+docker run -d --name proxy --restart unless-stopped \
+  --env-file .env \
+  -v "$HOME/.config/litellm/github_copilot:/root/.config/litellm/github_copilot:rw" \
+  -p "127.0.0.1:4000:4000" \
+  claude-code-copilot-proxy:latest
+
+```
+
+Then update Parameter Store (from CloudShell) with the new value and update any clients' `ANTHROPIC_AUTH_TOKEN`.
+
+### Redeploy after a repo update
+
+```bash
+cd /opt/claude-code-copilot
+git fetch origin && git reset --hard origin/main   # or your deploy branch
+docker build -t claude-code-copilot-proxy:latest .
+docker rm -f proxy
+docker run -d --name proxy --restart unless-stopped \
+  --env-file .env \
+  -v "$HOME/.config/litellm/github_copilot:/root/.config/litellm/github_copilot:rw" \
+  -p "127.0.0.1:4000:4000" \
+  claude-code-copilot-proxy:latest
+
+```
+
+The `.env` and the OAuth token are outside git and are untouched by a redeploy.
+
+### Back up the image to ECR
+
+A pushed image is a frozen, exact copy — no rebuild (and no dependency-version drift) needed to restore on a new host.
+
+```bash
+# one-time: create the repo (CloudShell)
+aws ecr create-repository --repository-name claude-code-copilot-proxy --region <region>
+
+# on the box
+ACCOUNT=<account>; REGION=<region>; REPO=claude-code-copilot-proxy
+ECR_URI=$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/$REPO
+aws ecr get-login-password --region $REGION | \
+  docker login --username AWS --password-stdin $ACCOUNT.dkr.ecr.$REGION.amazonaws.com
+docker tag claude-code-copilot-proxy:latest $ECR_URI:latest
+docker push $ECR_URI:latest
+
+```
+
+The instance role needs `ecr:GetAuthorizationToken` (resource `*`) plus, scoped to the repo ARN: `ecr:BatchCheckLayerAvailability`, `ecr:BatchGetImage`, `ecr:GetDownloadUrlForLayer`, `ecr:PutImage`, `ecr:InitiateLayerUpload`, `ecr:UploadLayerPart`, `ecr:CompleteLayerUpload`. (`BatchGetImage` is required — the push performs a manifest existence check that fails with `403 Forbidden` without it.)
+
+To restore on any host: `docker login` to ECR as above, then `docker pull $ECR_URI:latest`.
+
+### Grow the disk (no downtime)
+
+EBS volumes resize live. Modify the volume in the console (e.g. to 20 GiB), wait for "optimizing" to finish, then on the box:
+
+```bash
+lsblk                          # confirm the device, usually nvme0n1 / nvme0n1p1
+growpart /dev/nvme0n1 1
+resize2fs /dev/nvme0n1p1
+df -h /
+
+```
+
+Prune Docker before a rebuild if space is tight: `docker builder prune -af && docker image prune -af`.
+
+---
+
+## Model selection note
+
+The repo ships honest model mappings — `claude-sonnet-4-6` routes to `github_copilot/claude-sonnet-4.6`. If a particular model is unreliable on your Copilot plan (for example, intermittent `provider returned a response with no 'choices'` errors), you can remap the alias to a more reliable model your plan exposes by editing `litellm_config.yaml`, e.g.:
+
+```yaml
+  - model_name: "claude-sonnet-4-6"
+    litellm_params:
+      model: "github_copilot/claude-opus-4.8"   # remapped for reliability
+
+```
+
+Use `make list-models-enabled` to see exactly which models your plan exposes. Note that some models (e.g. GPT-5.x Codex) are only reachable via the Responses API and will reject `/v1/messages` chat-completion calls.
+
+---
+
+## What lives outside git
+
+A repo checkout does **not** capture the full running state. When rebuilding a host from scratch, these must be recreated manually:
+
+- `.env` — generated, git-ignored; holds `LITELLM_MASTER_KEY` (and Postgres password if using Compose).
+- **The Copilot OAuth token** — `~/.config/litellm/github_copilot/`; created by the §4 device-code flow, cannot be regenerated without redoing it.
+- **Caddy config and certificate** — `/opt/caddy/Caddyfile` and `/opt/caddy/data/`.
+- **AWS resources** — the instance, IAM role and policies, security group, Elastic IP, EBS volume, Parameter Store secret, DNS record, ECR repo.
+
+Keep this in mind for disaster recovery: the image (in ECR) plus this document plus the secret (in Parameter Store) are what make a rebuild reproducible.
