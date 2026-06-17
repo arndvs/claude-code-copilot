@@ -23,7 +23,7 @@ Claude Code client → HTTPS :443 → Caddy (TLS) → 127.0.0.1:4000 → LiteLLM
 
 - An AWS account, a registered domain, and a GitHub Copilot subscription.
 - A subdomain you can point at the instance (e.g. `proxy.example.com`).
-- Familiarity with the README's [Production ingress checklist](https://claude.ai/README.md#production-ingress-checklist).
+- Familiarity with the README's [Production ingress checklist](../README.md#production-ingress-checklist).
 
 ---
 
