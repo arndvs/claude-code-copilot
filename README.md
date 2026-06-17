@@ -10,6 +10,8 @@ Claude Code → LiteLLM proxy (local or hosted) → GitHub Copilot API
 
 GitHub Copilot subscriptions include access to Claude, GPT-4o, and other models — but only through GitHub's API. Claude Code expects the Anthropic Messages API. This proxy bridges that gap: it accepts Anthropic-format requests and translates them to GitHub Copilot's API, letting you run Claude Code against your existing Copilot subscription without paying for a separate Anthropic API key.
 
+For startup teams, this setup can also align AI dev spend with existing Azure-backed startup funding: Microsoft for Startups credits can fund Azure usage, which can flow into a GitHub organization billing account and Copilot seats, then into Claude Code workflows through this proxy. See [Microsoft for Startups overview](https://learn.microsoft.com/en-us/startups/microsoft-for-startups/overview) and confirm your current program and billing eligibility.
+
 This is the **infrastructure layer** for [ctrlshft](https://github.com/arndvs/ctrlshft) — a dotfiles-based operating system for autonomous AI coding agents. The `shft` CLI manages this proxy as a daemon, injecting `ANTHROPIC_BASE_URL` into every Claude session (interactive and autonomous) so all model requests route through Copilot.
 
 ```
