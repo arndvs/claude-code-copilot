@@ -20,16 +20,12 @@ from urllib.parse import urlparse
 def resolve_settings_file():
     override = os.environ.get('CLAUDE_SETTINGS_FILE', '').strip()
     if override:
-        return Path(override).expanduser()
+        return Path(os.path.expandvars(override)).expanduser()
     return Path.home() / '.claude' / 'settings.json'
 
 
 def resolve_base_url(port):
-    return (
-        os.environ.get('PROXY_BASE_URL', '').strip()
-        or os.environ.get('ANTHROPIC_BASE_URL', '').strip()
-        or f'http://localhost:{port}'
-    )
+    return os.environ.get('PROXY_BASE_URL', '').strip() or f'http://localhost:{port}'
 
 
 def is_local_base_url(base_url):

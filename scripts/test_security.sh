@@ -154,11 +154,27 @@ else
     pass "claude-enable backup path uses HOME-derived settings file"
 fi
 
+echo "Test 1d2: claude-disable uses HOME for backup paths"
+if grep -A10 '^claude-disable:' Makefile | grep -q '~/.claude/settings.json'; then
+    fail "claude-disable still uses shell-dependent ~/.claude/settings.json"
+elif ! grep -A10 '^claude-disable:' Makefile | grep -q 'chmod 600 "\$\$BACKUP"'; then
+    fail "claude-disable backup chmod does not quote BACKUP"
+else
+    pass "claude-disable backup path uses HOME-derived settings file"
+fi
+
 echo "Test 1e: claude-status treats IPv6 loopback as local"
 if grep -A20 'urlparse(sys.argv\[1\]).hostname' Makefile | grep -q '"::1"'; then
     pass "claude-status local-host detection includes IPv6 loopback"
 else
     fail "claude-status local-host detection does not include IPv6 loopback"
+fi
+
+echo "Test 1f: claude-status validates proxy URL before curl"
+if grep -A12 'PROXY_URL="http://localhost' Makefile | grep -q 'Proxy URL in settings is invalid'; then
+    pass "claude-status validates proxy URL before curl"
+else
+    fail "claude-status does not validate proxy URL before curl"
 fi
 
 # ── Test 2: claude_enable.py reads master key from env ─────────
@@ -232,6 +248,24 @@ else
     fail "Hosted proxy endpoint precedence is wrong: expected $HOSTED_PROXY_URL, got $WRITTEN_BASE_URL"
 fi
 
+# Should ignore ambient ANTHROPIC_BASE_URL when PROXY_BASE_URL is not configured
+echo "Test 2b2: claude_enable.py ignores ambient ANTHROPIC_BASE_URL"
+FAKE_SETTINGS_FILE_2B2="$TMPDIR_ROOT/home2b2/.claude/settings.json"
+mkdir -p "$(dirname "$FAKE_SETTINGS_FILE_2B2")"
+ANTHROPIC_BASE_URL="https://shell.example.test" CLAUDE_SETTINGS_FILE="$FAKE_SETTINGS_FILE_2B2" LITELLM_MASTER_KEY="$FAKE_KEY" LITELLM_PORT=4999 python3 scripts/claude_enable.py > /dev/null 2>&1
+WRITTEN_DEFAULT_BASE_URL=$(CLAUDE_SETTINGS_FILE="$FAKE_SETTINGS_FILE_2B2" python3 -c "
+import json, os
+from pathlib import Path
+d = json.load(open(Path(os.environ['CLAUDE_SETTINGS_FILE'])))
+print(d['env']['ANTHROPIC_BASE_URL'])
+")
+
+if [ "$WRITTEN_DEFAULT_BASE_URL" = "http://localhost:4999" ]; then
+    pass "Ambient ANTHROPIC_BASE_URL ignored without PROXY_BASE_URL"
+else
+    fail "Ambient ANTHROPIC_BASE_URL changed default endpoint: got $WRITTEN_DEFAULT_BASE_URL"
+fi
+
 # Should reject invalid proxy endpoint values before writing Claude settings
 echo "Test 2c: claude_enable.py rejects invalid proxy endpoint"
 FAKE_SETTINGS_FILE_2C="$TMPDIR_ROOT/home2c/.claude/settings.json"
@@ -242,6 +276,16 @@ elif [ -f "$FAKE_SETTINGS_FILE_2C" ]; then
     fail "claude_enable.py wrote settings after invalid proxy URL"
 else
     pass "Invalid proxy endpoint rejected before settings write"
+fi
+
+echo "Test 2d: claude_enable.py expands CLAUDE_SETTINGS_FILE env vars"
+FAKE_HOME_EXPAND="$TMPDIR_ROOT/home2d"
+FAKE_SETTINGS_FILE_2D="$FAKE_HOME_EXPAND/.claude/settings.json"
+HOME="$FAKE_HOME_EXPAND" CLAUDE_SETTINGS_FILE='$HOME/.claude/settings.json' LITELLM_MASTER_KEY="$FAKE_KEY" python3 scripts/claude_enable.py > /dev/null 2>&1
+if [ -f "$FAKE_SETTINGS_FILE_2D" ]; then
+    pass "CLAUDE_SETTINGS_FILE expands environment variables"
+else
+    fail "CLAUDE_SETTINGS_FILE environment variables were not expanded"
 fi
 
 # ── Test 3: Copilot token not in curl argv ─────────────────────

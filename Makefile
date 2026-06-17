@@ -101,10 +101,11 @@ claude-enable:
 	LITELLM_MASTER_KEY="$$MASTER_KEY" LITELLM_PORT="$$PORT" python3 scripts/claude_enable.py
 
 claude-disable:
-	@if [ -f ~/.claude/settings.json ]; then \
-		BACKUP=~/.claude/settings.json.proxy_backup.$$(date +%Y%m%d_%H%M%S); \
-		cp ~/.claude/settings.json $$BACKUP; \
-		chmod 600 $$BACKUP; \
+	@SETTINGS_FILE="$$HOME/.claude/settings.json"; \
+	if [ -f "$$SETTINGS_FILE" ]; then \
+		BACKUP="$$SETTINGS_FILE.proxy_backup.$$(date +%Y%m%d_%H%M%S)"; \
+		cp "$$SETTINGS_FILE" "$$BACKUP"; \
+		chmod 600 "$$BACKUP"; \
 		echo "📁 Backed up current settings to $$BACKUP"; \
 	fi
 	@python3 scripts/claude_disable.py
@@ -122,6 +123,10 @@ claude-status:
 			if [ -z "$$PROXY_URL" ]; then \
 				PORT=$$(grep LITELLM_PORT .env 2>/dev/null | cut -d'=' -f2 | tr -d '"' || echo '$(PORT)'); \
 				PROXY_URL="http://localhost:$${PORT:-$(PORT)}"; \
+			fi; \
+			if ! python3 -c 'from urllib.parse import urlparse; import sys; p=urlparse(sys.argv[1]); sys.exit(0 if p.scheme in ("http","https") and p.netloc else 1)' "$$PROXY_URL"; then \
+				echo "❌ Proxy URL in settings is invalid: $$PROXY_URL"; \
+				exit 0; \
 			fi; \
 			if python3 -c 'from urllib.parse import urlparse; import sys; host=urlparse(sys.argv[1]).hostname; sys.exit(0 if host in ("localhost","127.0.0.1","::1") else 1)' "$$PROXY_URL"; then \
 				echo "🔗 Routing: local proxy"; \
