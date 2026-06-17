@@ -95,6 +95,8 @@ def main():
     # Inject proxy env vars — merges into existing env dict
     settings.setdefault('$schema', 'https://json.schemastore.org/claude-code-settings.json')
     env = settings.get('env', {})
+    if not isinstance(env, dict):
+        env = {}
     env.update({
         'ANTHROPIC_BASE_URL': base_url,
         'ANTHROPIC_AUTH_TOKEN': master_key,

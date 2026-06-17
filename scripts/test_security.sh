@@ -281,11 +281,29 @@ fi
 echo "Test 2d: claude_enable.py expands CLAUDE_SETTINGS_FILE env vars"
 FAKE_HOME_EXPAND="$TMPDIR_ROOT/home2d"
 FAKE_SETTINGS_FILE_2D="$FAKE_HOME_EXPAND/.claude/settings.json"
+mkdir -p "$FAKE_HOME_EXPAND"
 HOME="$FAKE_HOME_EXPAND" CLAUDE_SETTINGS_FILE='$HOME/.claude/settings.json' LITELLM_MASTER_KEY="$FAKE_KEY" python3 scripts/claude_enable.py > /dev/null 2>&1
 if [ -f "$FAKE_SETTINGS_FILE_2D" ]; then
     pass "CLAUDE_SETTINGS_FILE expands environment variables"
 else
     fail "CLAUDE_SETTINGS_FILE environment variables were not expanded"
+fi
+
+echo "Test 2e: claude_enable.py repairs malformed env blocks"
+FAKE_SETTINGS_FILE_2E="$TMPDIR_ROOT/home2e/.claude/settings.json"
+mkdir -p "$(dirname "$FAKE_SETTINGS_FILE_2E")"
+printf '{"env":[]}\n' > "$FAKE_SETTINGS_FILE_2E"
+CLAUDE_SETTINGS_FILE="$FAKE_SETTINGS_FILE_2E" LITELLM_MASTER_KEY="$FAKE_KEY" python3 scripts/claude_enable.py > /dev/null 2>&1
+if CLAUDE_SETTINGS_FILE="$FAKE_SETTINGS_FILE_2E" EXPECTED_KEY="$FAKE_KEY" python3 -c "
+import json, os, sys
+from pathlib import Path
+d = json.load(open(Path(os.environ['CLAUDE_SETTINGS_FILE'])))
+env = d.get('env')
+sys.exit(0 if isinstance(env, dict) and env.get('ANTHROPIC_AUTH_TOKEN') == os.environ['EXPECTED_KEY'] else 1)
+"; then
+    pass "Malformed env block repaired by claude-enable"
+else
+    fail "Malformed env block was not repaired"
 fi
 
 # ── Test 3: Copilot token not in curl argv ─────────────────────
