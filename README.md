@@ -181,15 +181,44 @@ make start
 docker build -t claude-code-copilot .
 docker run --env-file .env \
   -v "$HOME/.config/litellm/github_copilot:/root/.config/litellm/github_copilot:ro" \
-  -p "${LITELLM_PORT:-4000}:4000" \
+  -p "127.0.0.1:${LITELLM_PORT:-4000}:4000" \
   claude-code-copilot
 ```
+
+Bind the container port to `127.0.0.1` for production or shared hosts. The
+LiteLLM proxy should not be reachable directly from the internet; put Caddy,
+nginx, or another TLS reverse proxy in front of it and expose only `80/443`.
 
 ### Docker Compose (with database for spend tracking)
 
 ```bash
 docker compose up --build
 ```
+
+The Compose file also binds LiteLLM to `127.0.0.1:${LITELLM_PORT:-4000}`. This
+keeps model endpoints private to the host while a local reverse proxy forwards
+authenticated HTTPS traffic to `127.0.0.1:4000`.
+
+### Production ingress checklist
+
+- Public firewall/security group allows only `443/tcp`, plus `80/tcp` if needed
+  for certificate issuance or HTTP-to-HTTPS redirects.
+- No public firewall/security group rule exposes `${LITELLM_PORT:-4000}`.
+- Docker publishes LiteLLM as `127.0.0.1:${LITELLM_PORT:-4000}:4000`, not
+  `${LITELLM_PORT:-4000}:4000`.
+- Caddy/nginx forwards HTTPS requests to `127.0.0.1:${LITELLM_PORT:-4000}`.
+- `/v1/messages` rejects requests without `Authorization: Bearer
+  <LITELLM_MASTER_KEY>`.
+- External requests to `http://<host>:${LITELLM_PORT:-4000}` fail or time out.
+
+On the host, verify the bind address before exposing the service:
+
+```bash
+ss -ltnp | grep "${LITELLM_PORT:-4000}"
+```
+
+Expected: a `127.0.0.1:${LITELLM_PORT:-4000}` listener, not
+`0.0.0.0:${LITELLM_PORT:-4000}`.
 
 ---
 
