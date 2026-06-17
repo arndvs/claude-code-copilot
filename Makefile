@@ -95,7 +95,7 @@ claude-enable:
 	if [ -f "$$SETTINGS_FILE" ]; then \
 		BACKUP="$$SETTINGS_FILE.backup.$$(date +%Y%m%d_%H%M%S)"; \
 		cp "$$SETTINGS_FILE" "$$BACKUP"; \
-		chmod 600 $$BACKUP; \
+		chmod 600 "$$BACKUP"; \
 		echo "📁 Backed up settings to $$BACKUP"; \
 	fi; \
 	LITELLM_MASTER_KEY="$$MASTER_KEY" LITELLM_PORT="$$PORT" python3 scripts/claude_enable.py
@@ -115,7 +115,7 @@ claude-status:
 	@echo "─────────────────────────────────────────"
 	@SETTINGS_FILE="$$HOME/.claude/settings.json"; \
 	if [ -f "$$SETTINGS_FILE" ]; then \
-		python3 scripts/claude_status_redact.py < "$$SETTINGS_FILE" 2>/dev/null || echo '(could not parse settings)'; \
+		python3 scripts/claude_status_redact.py < "$$SETTINGS_FILE" 2>/dev/null || { echo '(could not parse settings)'; exit 0; }; \
 		echo ""; \
 		if grep -q "ANTHROPIC_BASE_URL" "$$SETTINGS_FILE" 2>/dev/null; then \
 			PROXY_URL=$$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("env",{}).get("ANTHROPIC_BASE_URL",""))' "$$SETTINGS_FILE" 2>/dev/null); \

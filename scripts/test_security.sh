@@ -10,7 +10,6 @@ set -euo pipefail
 
 PASS=0
 FAIL=0
-REPO_ROOT=$(pwd)
 TMPDIR_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/sec-test-XXXXXX")
 cleanup() { rm -rf "$TMPDIR_ROOT"; }
 trap cleanup EXIT
@@ -104,6 +103,10 @@ fi
 
 if echo "$INVALID_OUTPUT" | grep -q "sk-leaked"; then
     fail "Invalid JSON leaked file contents"
+elif echo "$INVALID_OUTPUT" | grep -q "Routing:"; then
+    fail "Invalid JSON continued into routing detection"
+elif echo "$INVALID_OUTPUT" | grep -q "Proxy:"; then
+    fail "Invalid JSON continued into proxy health detection"
 else
     pass "Invalid JSON handled safely"
 fi
@@ -145,6 +148,8 @@ fi
 echo "Test 1d: claude-enable uses HOME for backup paths"
 if grep -A12 '^claude-enable:' Makefile | grep -q '~/.claude/settings.json'; then
     fail "claude-enable still uses shell-dependent ~/.claude/settings.json"
+elif ! grep -A12 '^claude-enable:' Makefile | grep -q 'chmod 600 "\$\$BACKUP"'; then
+    fail "claude-enable backup chmod does not quote BACKUP"
 else
     pass "claude-enable backup path uses HOME-derived settings file"
 fi
