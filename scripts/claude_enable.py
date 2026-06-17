@@ -37,6 +37,18 @@ def is_local_base_url(base_url):
     return host in {'localhost', '127.0.0.1', '::1'}
 
 
+def validate_base_url(base_url, port):
+    parsed = urlparse(base_url)
+    if parsed.scheme not in {'http', 'https'} or not parsed.netloc:
+        print(
+            f"❌ Invalid proxy base URL: {base_url!r}. Expected an absolute "
+            f"http(s) URL (e.g. 'http://localhost:{port}' or "
+            "'https://proxy.example.com').",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
 def main():
     master_key = os.environ.get('LITELLM_MASTER_KEY', '').strip()
     if not master_key:
@@ -49,6 +61,7 @@ def main():
 
     port = os.environ.get('LITELLM_PORT', '').strip() or "4000"
     base_url = resolve_base_url(port)
+    validate_base_url(base_url, port)
 
     settings_file = resolve_settings_file()
     claude_dir = settings_file.parent

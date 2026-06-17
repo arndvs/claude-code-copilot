@@ -91,9 +91,10 @@ claude-enable:
 	PORT=$${LITELLM_PORT:-$(PORT)} && \
 	MASTER_KEY=$$LITELLM_MASTER_KEY && \
 	if [ -z "$$MASTER_KEY" ]; then echo "❌ LITELLM_MASTER_KEY not found in .env"; exit 1; fi; \
-	if [ -f ~/.claude/settings.json ]; then \
-		BACKUP=~/.claude/settings.json.backup.$$(date +%Y%m%d_%H%M%S); \
-		cp ~/.claude/settings.json $$BACKUP; \
+	SETTINGS_FILE="$$HOME/.claude/settings.json"; \
+	if [ -f "$$SETTINGS_FILE" ]; then \
+		BACKUP="$$SETTINGS_FILE.backup.$$(date +%Y%m%d_%H%M%S)"; \
+		cp "$$SETTINGS_FILE" "$$BACKUP"; \
 		chmod 600 $$BACKUP; \
 		echo "📁 Backed up settings to $$BACKUP"; \
 	fi; \
@@ -122,16 +123,13 @@ claude-status:
 				PORT=$$(grep LITELLM_PORT .env 2>/dev/null | cut -d'=' -f2 | tr -d '"' || echo '$(PORT)'); \
 				PROXY_URL="http://localhost:$${PORT:-$(PORT)}"; \
 			fi; \
-			case "$$PROXY_URL" in \
-				http://localhost|http://localhost:*|http://localhost/*|https://localhost|https://localhost:*|https://localhost/*|http://127.0.0.1|http://127.0.0.1:*|http://127.0.0.1/*|https://127.0.0.1|https://127.0.0.1:*|https://127.0.0.1/*) \
-					echo "🔗 Routing: local proxy"; \
-					PROXY_HINT="run 'make start'"; \
-					;; \
-				*) \
-					echo "🔗 Routing: hosted proxy"; \
-					PROXY_HINT="check the hosted proxy endpoint"; \
-					;; \
-			esac; \
+			if python3 -c 'from urllib.parse import urlparse; import sys; host=urlparse(sys.argv[1]).hostname; sys.exit(0 if host in ("localhost","127.0.0.1","::1") else 1)' "$$PROXY_URL"; then \
+				echo "🔗 Routing: local proxy"; \
+				PROXY_HINT="run 'make start'"; \
+			else \
+				echo "🔗 Routing: hosted proxy"; \
+				PROXY_HINT="check the hosted proxy endpoint"; \
+			fi; \
 			if curl -sf "$$PROXY_URL/health/readiness" >/dev/null 2>&1; then \
 				echo "✅ Proxy: running at $$PROXY_URL"; \
 			else \

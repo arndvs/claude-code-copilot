@@ -141,6 +141,21 @@ else
     pass "Hosted proxy status test skipped because make is unavailable"
 fi
 
+# Verify claude-enable does not use shell-dependent ~ paths for backups
+echo "Test 1d: claude-enable uses HOME for backup paths"
+if grep -A12 '^claude-enable:' Makefile | grep -q '~/.claude/settings.json'; then
+    fail "claude-enable still uses shell-dependent ~/.claude/settings.json"
+else
+    pass "claude-enable backup path uses HOME-derived settings file"
+fi
+
+echo "Test 1e: claude-status treats IPv6 loopback as local"
+if grep -A20 'urlparse(sys.argv\[1\]).hostname' Makefile | grep -q '"::1"'; then
+    pass "claude-status local-host detection includes IPv6 loopback"
+else
+    fail "claude-status local-host detection does not include IPv6 loopback"
+fi
+
 # ── Test 2: claude_enable.py reads master key from env ─────────
 echo "Test 2: claude_enable.py reads master key from env"
 
@@ -210,6 +225,18 @@ if [ "$WRITTEN_BASE_URL" = "$HOSTED_PROXY_URL" ]; then
     pass "Hosted proxy endpoint preserved by claude-enable"
 else
     fail "Hosted proxy endpoint precedence is wrong: expected $HOSTED_PROXY_URL, got $WRITTEN_BASE_URL"
+fi
+
+# Should reject invalid proxy endpoint values before writing Claude settings
+echo "Test 2c: claude_enable.py rejects invalid proxy endpoint"
+FAKE_SETTINGS_FILE_2C="$TMPDIR_ROOT/home2c/.claude/settings.json"
+mkdir -p "$(dirname "$FAKE_SETTINGS_FILE_2C")"
+if CLAUDE_SETTINGS_FILE="$FAKE_SETTINGS_FILE_2C" LITELLM_MASTER_KEY="$FAKE_KEY" PROXY_BASE_URL="proxy.example.test" python3 scripts/claude_enable.py > /dev/null 2>&1; then
+    fail "claude_enable.py should fail for proxy URL without a scheme"
+elif [ -f "$FAKE_SETTINGS_FILE_2C" ]; then
+    fail "claude_enable.py wrote settings after invalid proxy URL"
+else
+    pass "Invalid proxy endpoint rejected before settings write"
 fi
 
 # ── Test 3: Copilot token not in curl argv ─────────────────────
