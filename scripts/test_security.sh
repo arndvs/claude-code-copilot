@@ -164,14 +164,48 @@ else
 fi
 
 echo "Test 1e: claude-status treats IPv6 loopback as local"
-if grep -A20 'urlparse(sys.argv\[1\]).hostname' Makefile | grep -q '"::1"'; then
+if command -v make >/dev/null 2>&1; then
+    FAKE_HOME_IPV6="$TMPDIR_ROOT/home1e"
+    mkdir -p "$FAKE_HOME_IPV6/.claude"
+    cat > "$FAKE_HOME_IPV6/.claude/settings.json" <<'JSON'
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://[::1]:4000",
+    "ANTHROPIC_AUTH_TOKEN": "sk-ipv6-secret"
+  }
+}
+JSON
+
+    if IPV6_STATUS_OUTPUT=$(run_claude_status "$FAKE_HOME_IPV6" 2>/dev/null) && echo "$IPV6_STATUS_OUTPUT" | grep -q "Routing: local proxy"; then
+        pass "claude-status local-host detection includes IPv6 loopback"
+    else
+        fail "claude-status local-host detection does not include IPv6 loopback"
+    fi
+elif grep -A20 'urlparse(sys.argv\[1\]).hostname' Makefile | grep -q '"::1"'; then
     pass "claude-status local-host detection includes IPv6 loopback"
 else
     fail "claude-status local-host detection does not include IPv6 loopback"
 fi
 
 echo "Test 1f: claude-status validates proxy URL before curl"
-if grep -A12 'PROXY_URL="http://localhost' Makefile | grep -q 'Proxy URL in settings is invalid'; then
+if command -v make >/dev/null 2>&1; then
+    FAKE_HOME_INVALID_URL="$TMPDIR_ROOT/home1f"
+    mkdir -p "$FAKE_HOME_INVALID_URL/.claude"
+    cat > "$FAKE_HOME_INVALID_URL/.claude/settings.json" <<'JSON'
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "proxy.example.test",
+    "ANTHROPIC_AUTH_TOKEN": "sk-invalid-secret"
+  }
+}
+JSON
+
+    if INVALID_URL_STATUS_OUTPUT=$(run_claude_status "$FAKE_HOME_INVALID_URL" 2>/dev/null) && echo "$INVALID_URL_STATUS_OUTPUT" | grep -q "Proxy URL in settings is invalid"; then
+        pass "claude-status validates proxy URL before curl"
+    else
+        fail "claude-status does not validate proxy URL before curl"
+    fi
+elif grep -A12 'PROXY_URL="http://localhost' Makefile | grep -q 'Proxy URL in settings is invalid'; then
     pass "claude-status validates proxy URL before curl"
 else
     fail "claude-status does not validate proxy URL before curl"
