@@ -10,6 +10,7 @@ set -euo pipefail
 
 PASS=0
 FAIL=0
+REPO_ROOT=$(pwd)
 TMPDIR_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/sec-test-XXXXXX")
 cleanup() { rm -rf "$TMPDIR_ROOT"; }
 trap cleanup EXIT
@@ -107,6 +108,39 @@ else
     pass "Invalid JSON handled safely"
 fi
 
+# Verify hosted proxy status is labeled and remediated correctly
+echo "Test 1c: claude-status handles hosted proxy URLs"
+if command -v make >/dev/null 2>&1; then
+    FAKE_HOME_HOSTED="$TMPDIR_ROOT/home1c"
+    mkdir -p "$FAKE_HOME_HOSTED/.claude"
+    cat > "$FAKE_HOME_HOSTED/.claude/settings.json" <<'JSON'
+  {
+    "env": {
+      "ANTHROPIC_BASE_URL": "https://proxy.example.test",
+      "ANTHROPIC_AUTH_TOKEN": "sk-hosted-secret"
+    }
+  }
+JSON
+
+    if ! HOSTED_STATUS_OUTPUT=$(run_claude_status "$FAKE_HOME_HOSTED" 2>/dev/null); then
+        fail "claude-status failed for hosted proxy settings"
+    fi
+
+    if echo "$HOSTED_STATUS_OUTPUT" | grep -q "sk-hosted-secret"; then
+        fail "Hosted proxy status leaked auth token"
+    elif ! echo "$HOSTED_STATUS_OUTPUT" | grep -q "Routing: hosted proxy"; then
+        fail "Hosted proxy status was not labeled as hosted"
+    elif echo "$HOSTED_STATUS_OUTPUT" | grep -q "run 'make start'"; then
+        fail "Hosted proxy status suggested starting a local proxy"
+    elif ! echo "$HOSTED_STATUS_OUTPUT" | grep -q "check the hosted proxy endpoint"; then
+        fail "Hosted proxy status did not suggest checking the hosted endpoint"
+    else
+        pass "Hosted proxy status uses hosted label and remediation"
+    fi
+else
+    pass "Hosted proxy status test skipped because make is unavailable"
+fi
+
 # ── Test 2: claude_enable.py reads master key from env ─────────
 echo "Test 2: claude_enable.py reads master key from env"
 
@@ -142,6 +176,40 @@ if CLAUDE_SETTINGS_FILE="$FAKE_SETTINGS_FILE" LITELLM_MASTER_KEY="" python3 scri
     fail "claude_enable.py should fail when LITELLM_MASTER_KEY is empty"
 else
     pass "claude_enable.py fails with clear error when key missing"
+fi
+
+# Should preserve a configured hosted proxy endpoint when enabling Claude Code
+echo "Test 2b: claude_enable.py preserves hosted proxy endpoint"
+FAKE_HOME3B="$TMPDIR_ROOT/home2b"
+FAKE_REPO="$TMPDIR_ROOT/repo2b"
+FAKE_SETTINGS_FILE_2B="$FAKE_HOME3B/.claude/settings.json"
+HOSTED_PROXY_URL="https://proxy.example.test"
+mkdir -p "$(dirname "$FAKE_SETTINGS_FILE_2B")" "$FAKE_REPO/scripts"
+cp scripts/claude_enable.py "$FAKE_REPO/scripts/claude_enable.py"
+cat > "$FAKE_REPO/.env" <<EOF
+LITELLM_MASTER_KEY=$FAKE_KEY
+LITELLM_PORT=4999
+PROXY_BASE_URL=$HOSTED_PROXY_URL
+EOF
+
+(
+    cd "$FAKE_REPO"
+    set -a
+    . ./.env
+    set +a
+    CLAUDE_SETTINGS_FILE="$FAKE_SETTINGS_FILE_2B" python3 scripts/claude_enable.py > /dev/null 2>&1
+)
+WRITTEN_BASE_URL=$(CLAUDE_SETTINGS_FILE="$FAKE_SETTINGS_FILE_2B" python3 -c "
+import json, os
+from pathlib import Path
+d = json.load(open(Path(os.environ['CLAUDE_SETTINGS_FILE'])))
+print(d['env']['ANTHROPIC_BASE_URL'])
+")
+
+if [ "$WRITTEN_BASE_URL" = "$HOSTED_PROXY_URL" ]; then
+    pass "Hosted proxy endpoint preserved by claude-enable"
+else
+    fail "Hosted proxy endpoint was overwritten: expected $HOSTED_PROXY_URL, got $WRITTEN_BASE_URL"
 fi
 
 # ── Test 3: Copilot token not in curl argv ─────────────────────

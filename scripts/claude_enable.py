@@ -14,6 +14,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 def resolve_settings_file():
@@ -21,6 +22,19 @@ def resolve_settings_file():
     if override:
         return Path(override).expanduser()
     return Path.home() / '.claude' / 'settings.json'
+
+
+def resolve_base_url(port):
+    return (
+        os.environ.get('ANTHROPIC_BASE_URL', '').strip()
+        or os.environ.get('PROXY_BASE_URL', '').strip()
+        or f'http://localhost:{port}'
+    )
+
+
+def is_local_base_url(base_url):
+    host = urlparse(base_url).hostname
+    return host in {'localhost', '127.0.0.1', '::1'}
 
 
 def main():
@@ -34,6 +48,7 @@ def main():
         sys.exit(1)
 
     port = os.environ.get('LITELLM_PORT', '').strip() or "4000"
+    base_url = resolve_base_url(port)
 
     settings_file = resolve_settings_file()
     claude_dir = settings_file.parent
@@ -72,7 +87,7 @@ def main():
     settings.setdefault('$schema', 'https://json.schemastore.org/claude-code-settings.json')
     env = settings.get('env', {})
     env.update({
-        'ANTHROPIC_BASE_URL': f'http://localhost:{port}',
+        'ANTHROPIC_BASE_URL': base_url,
         'ANTHROPIC_AUTH_TOKEN': master_key,
         # Required — Copilot doesn't support extended thinking
         'CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS': '1',
@@ -92,9 +107,12 @@ def main():
         raise
     settings_file.chmod(0o600)
 
-    print(f'✅ Claude Code configured to use proxy at http://localhost:{port}')
+    print(f'✅ Claude Code configured to use proxy at {base_url}')
     print(f'   Settings: {settings_file}')
-    print(f'   Run ./start_proxy.sh in a separate terminal, then launch claude.')
+    if is_local_base_url(base_url):
+        print(f'   Run ./start_proxy.sh in a separate terminal, then launch claude.')
+    else:
+        print(f'   Ensure the hosted proxy is reachable, then launch claude.')
 
 if __name__ == '__main__':
     main()
