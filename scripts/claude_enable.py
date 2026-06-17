@@ -26,8 +26,8 @@ def resolve_settings_file():
 
 def resolve_base_url(port):
     return (
-        os.environ.get('ANTHROPIC_BASE_URL', '').strip()
-        or os.environ.get('PROXY_BASE_URL', '').strip()
+        os.environ.get('PROXY_BASE_URL', '').strip()
+        or os.environ.get('ANTHROPIC_BASE_URL', '').strip()
         or f'http://localhost:{port}'
     )
 

@@ -197,7 +197,7 @@ EOF
     set -a
     . ./.env
     set +a
-    CLAUDE_SETTINGS_FILE="$FAKE_SETTINGS_FILE_2B" python3 scripts/claude_enable.py > /dev/null 2>&1
+    ANTHROPIC_BASE_URL="https://shell.example.test" CLAUDE_SETTINGS_FILE="$FAKE_SETTINGS_FILE_2B" python3 scripts/claude_enable.py > /dev/null 2>&1
 )
 WRITTEN_BASE_URL=$(CLAUDE_SETTINGS_FILE="$FAKE_SETTINGS_FILE_2B" python3 -c "
 import json, os
@@ -209,7 +209,7 @@ print(d['env']['ANTHROPIC_BASE_URL'])
 if [ "$WRITTEN_BASE_URL" = "$HOSTED_PROXY_URL" ]; then
     pass "Hosted proxy endpoint preserved by claude-enable"
 else
-    fail "Hosted proxy endpoint was overwritten: expected $HOSTED_PROXY_URL, got $WRITTEN_BASE_URL"
+    fail "Hosted proxy endpoint precedence is wrong: expected $HOSTED_PROXY_URL, got $WRITTEN_BASE_URL"
 fi
 
 # ── Test 3: Copilot token not in curl argv ─────────────────────

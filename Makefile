@@ -112,11 +112,12 @@ claude-status:
 	@echo ""
 	@echo "Claude Code configuration"
 	@echo "─────────────────────────────────────────"
-	@if [ -f ~/.claude/settings.json ]; then \
-		python3 scripts/claude_status_redact.py < ~/.claude/settings.json 2>/dev/null || echo '(could not parse settings)'; \
+	@SETTINGS_FILE="$$HOME/.claude/settings.json"; \
+	if [ -f "$$SETTINGS_FILE" ]; then \
+		python3 scripts/claude_status_redact.py < "$$SETTINGS_FILE" 2>/dev/null || echo '(could not parse settings)'; \
 		echo ""; \
-		if grep -q "ANTHROPIC_BASE_URL" ~/.claude/settings.json 2>/dev/null; then \
-			PROXY_URL=$$(python3 -c "import json; print(json.load(open('$$HOME/.claude/settings.json')).get('env',{}).get('ANTHROPIC_BASE_URL',''))" 2>/dev/null); \
+		if grep -q "ANTHROPIC_BASE_URL" "$$SETTINGS_FILE" 2>/dev/null; then \
+			PROXY_URL=$$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("env",{}).get("ANTHROPIC_BASE_URL",""))' "$$SETTINGS_FILE" 2>/dev/null); \
 			if [ -z "$$PROXY_URL" ]; then \
 				PORT=$$(grep LITELLM_PORT .env 2>/dev/null | cut -d'=' -f2 | tr -d '"' || echo '$(PORT)'); \
 				PROXY_URL="http://localhost:$${PORT:-$(PORT)}"; \
