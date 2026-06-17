@@ -56,7 +56,7 @@ def main():
         sys.exit(1)
 
     port = os.environ.get('LITELLM_PORT', '').strip() or "4000"
-    base_url = resolve_base_url(port)
+    base_url = resolve_base_url(port).rstrip('/')
     validate_base_url(base_url, port)
 
     settings_file = resolve_settings_file()

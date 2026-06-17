@@ -260,6 +260,30 @@ else
     fail "claude-status mishandles malformed env blocks"
 fi
 
+echo "Test 1f4: claude-status strips trailing proxy URL slash"
+if command -v make >/dev/null 2>&1; then
+    FAKE_HOME_TRAILING_SLASH="$TMPDIR_ROOT/home1f4"
+    mkdir -p "$FAKE_HOME_TRAILING_SLASH/.claude"
+    cat > "$FAKE_HOME_TRAILING_SLASH/.claude/settings.json" <<'JSON'
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://proxy.example.test/",
+    "ANTHROPIC_AUTH_TOKEN": "sk-trailing-slash-secret"
+  }
+}
+JSON
+
+    if TRAILING_SLASH_STATUS_OUTPUT=$(run_claude_status "$FAKE_HOME_TRAILING_SLASH" 2>/dev/null) && echo "$TRAILING_SLASH_STATUS_OUTPUT" | grep -q "Proxy: not running at https://proxy.example.test "; then
+        pass "claude-status strips trailing proxy URL slash"
+    else
+        fail "claude-status did not strip trailing proxy URL slash"
+    fi
+elif grep -q 'PROXY_URL=$${PROXY_URL%/}' Makefile; then
+    pass "claude-status strips trailing proxy URL slash"
+else
+    fail "claude-status did not strip trailing proxy URL slash"
+fi
+
 # ── Test 2: claude_enable.py reads master key from env ─────────
 echo "Test 2: claude_enable.py reads master key from env"
 
@@ -329,6 +353,23 @@ if [ "$WRITTEN_BASE_URL" = "$HOSTED_PROXY_URL" ]; then
     pass "Hosted proxy endpoint preserved by claude-enable"
 else
     fail "Hosted proxy endpoint precedence is wrong: expected $HOSTED_PROXY_URL, got $WRITTEN_BASE_URL"
+fi
+
+echo "Test 2b1: claude_enable.py strips hosted proxy trailing slash"
+FAKE_SETTINGS_FILE_2B1="$TMPDIR_ROOT/home2b1/.claude/settings.json"
+mkdir -p "$(dirname "$FAKE_SETTINGS_FILE_2B1")"
+CLAUDE_SETTINGS_FILE="$FAKE_SETTINGS_FILE_2B1" LITELLM_MASTER_KEY="$FAKE_KEY" PROXY_BASE_URL="$HOSTED_PROXY_URL/" python3 scripts/claude_enable.py > /dev/null 2>&1
+WRITTEN_STRIPPED_BASE_URL=$(CLAUDE_SETTINGS_FILE="$FAKE_SETTINGS_FILE_2B1" python3 -c "
+import json, os
+from pathlib import Path
+d = json.load(open(Path(os.environ['CLAUDE_SETTINGS_FILE'])))
+print(d['env']['ANTHROPIC_BASE_URL'])
+")
+
+if [ "$WRITTEN_STRIPPED_BASE_URL" = "$HOSTED_PROXY_URL" ]; then
+    pass "Hosted proxy trailing slash stripped by claude-enable"
+else
+    fail "Hosted proxy trailing slash was not stripped: got $WRITTEN_STRIPPED_BASE_URL"
 fi
 
 # Should ignore ambient ANTHROPIC_BASE_URL when PROXY_BASE_URL is not configured

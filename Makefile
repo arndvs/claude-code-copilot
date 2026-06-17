@@ -124,6 +124,7 @@ claude-status:
 				PORT=$$(grep LITELLM_PORT .env 2>/dev/null | cut -d'=' -f2 | tr -d '"' || echo '$(PORT)'); \
 				PROXY_URL="http://localhost:$${PORT:-$(PORT)}"; \
 			fi; \
+			PROXY_URL=$${PROXY_URL%/}; \
 			if ! python3 -c 'from urllib.parse import urlparse; import sys; p=urlparse(sys.argv[1]); sys.exit(0 if p.scheme in ("http","https") and p.netloc and p.hostname else 1)' "$$PROXY_URL"; then \
 				echo "❌ Proxy URL in settings is invalid: $$PROXY_URL"; \
 				exit 0; \
