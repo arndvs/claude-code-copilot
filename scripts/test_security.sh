@@ -8,6 +8,10 @@
 
 set -euo pipefail
 
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
+cd "$REPO_ROOT"
+
 PASS=0
 FAIL=0
 TMPDIR_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/sec-test-XXXXXX")
@@ -211,6 +215,51 @@ else
     fail "claude-status does not validate proxy URL before curl"
 fi
 
+echo "Test 1f2: claude-status rejects proxy URLs without hostnames"
+if command -v make >/dev/null 2>&1; then
+    FAKE_HOME_NO_HOST="$TMPDIR_ROOT/home1f2"
+    mkdir -p "$FAKE_HOME_NO_HOST/.claude"
+    cat > "$FAKE_HOME_NO_HOST/.claude/settings.json" <<'JSON'
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://:4000",
+    "ANTHROPIC_AUTH_TOKEN": "sk-no-host-secret"
+  }
+}
+JSON
+
+    if NO_HOST_STATUS_OUTPUT=$(run_claude_status "$FAKE_HOME_NO_HOST" 2>/dev/null) && echo "$NO_HOST_STATUS_OUTPUT" | grep -q "Proxy URL in settings is invalid"; then
+        pass "claude-status rejects proxy URLs without hostnames"
+    else
+        fail "claude-status accepts proxy URLs without hostnames"
+    fi
+elif grep -A12 'p.scheme in ("http","https")' Makefile | grep -q 'p.hostname'; then
+    pass "claude-status rejects proxy URLs without hostnames"
+else
+    fail "claude-status accepts proxy URLs without hostnames"
+fi
+
+echo "Test 1f3: claude-status handles malformed env blocks"
+if command -v make >/dev/null 2>&1; then
+    FAKE_HOME_MALFORMED_ENV="$TMPDIR_ROOT/home1f3"
+    mkdir -p "$FAKE_HOME_MALFORMED_ENV/.claude"
+    cat > "$FAKE_HOME_MALFORMED_ENV/.claude/settings.json" <<'JSON'
+{
+  "env": []
+}
+JSON
+
+    if MALFORMED_ENV_STATUS_OUTPUT=$(run_claude_status "$FAKE_HOME_MALFORMED_ENV" 2>/dev/null) && echo "$MALFORMED_ENV_STATUS_OUTPUT" | grep -q "Anthropic API directly"; then
+        pass "claude-status handles malformed env blocks"
+    else
+        fail "claude-status mishandles malformed env blocks"
+    fi
+elif grep -q 'isinstance(env, dict)' Makefile; then
+    pass "claude-status handles malformed env blocks"
+else
+    fail "claude-status mishandles malformed env blocks"
+fi
+
 # ── Test 2: claude_enable.py reads master key from env ─────────
 echo "Test 2: claude_enable.py reads master key from env"
 
@@ -310,6 +359,17 @@ elif [ -f "$FAKE_SETTINGS_FILE_2C" ]; then
     fail "claude_enable.py wrote settings after invalid proxy URL"
 else
     pass "Invalid proxy endpoint rejected before settings write"
+fi
+
+echo "Test 2c2: claude_enable.py rejects proxy URLs without hostnames"
+FAKE_SETTINGS_FILE_2C2="$TMPDIR_ROOT/home2c2/.claude/settings.json"
+mkdir -p "$(dirname "$FAKE_SETTINGS_FILE_2C2")"
+if CLAUDE_SETTINGS_FILE="$FAKE_SETTINGS_FILE_2C2" LITELLM_MASTER_KEY="$FAKE_KEY" PROXY_BASE_URL="http://:4000" python3 scripts/claude_enable.py > /dev/null 2>&1; then
+    fail "claude_enable.py should fail for proxy URL without a hostname"
+elif [ -f "$FAKE_SETTINGS_FILE_2C2" ]; then
+    fail "claude_enable.py wrote settings after proxy URL without a hostname"
+else
+    pass "Proxy URL without hostname rejected before settings write"
 fi
 
 echo "Test 2d: claude_enable.py expands CLAUDE_SETTINGS_FILE env vars"

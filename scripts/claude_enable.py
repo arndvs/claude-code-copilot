@@ -35,7 +35,7 @@ def is_local_base_url(base_url):
 
 def validate_base_url(base_url, port):
     parsed = urlparse(base_url)
-    if parsed.scheme not in {'http', 'https'} or not parsed.netloc:
+    if parsed.scheme not in {'http', 'https'} or not parsed.netloc or not parsed.hostname:
         print(
             f"❌ Invalid proxy base URL: {base_url!r}. Expected an absolute "
             f"http(s) URL (e.g. 'http://localhost:{port}' or "

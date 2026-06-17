@@ -119,12 +119,12 @@ claude-status:
 		python3 scripts/claude_status_redact.py < "$$SETTINGS_FILE" 2>/dev/null || { echo '(could not parse settings)'; exit 0; }; \
 		echo ""; \
 		if grep -q "ANTHROPIC_BASE_URL" "$$SETTINGS_FILE" 2>/dev/null; then \
-			PROXY_URL=$$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("env",{}).get("ANTHROPIC_BASE_URL",""))' "$$SETTINGS_FILE" 2>/dev/null); \
+			PROXY_URL=$$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); env=d.get("env", {}); print(env.get("ANTHROPIC_BASE_URL", "") if isinstance(env, dict) else "")' "$$SETTINGS_FILE" 2>/dev/null); \
 			if [ -z "$$PROXY_URL" ]; then \
 				PORT=$$(grep LITELLM_PORT .env 2>/dev/null | cut -d'=' -f2 | tr -d '"' || echo '$(PORT)'); \
 				PROXY_URL="http://localhost:$${PORT:-$(PORT)}"; \
 			fi; \
-			if ! python3 -c 'from urllib.parse import urlparse; import sys; p=urlparse(sys.argv[1]); sys.exit(0 if p.scheme in ("http","https") and p.netloc else 1)' "$$PROXY_URL"; then \
+			if ! python3 -c 'from urllib.parse import urlparse; import sys; p=urlparse(sys.argv[1]); sys.exit(0 if p.scheme in ("http","https") and p.netloc and p.hostname else 1)' "$$PROXY_URL"; then \
 				echo "❌ Proxy URL in settings is invalid: $$PROXY_URL"; \
 				exit 0; \
 			fi; \
