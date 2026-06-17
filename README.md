@@ -195,9 +195,11 @@ nginx, or another TLS reverse proxy in front of it and expose only `80/443`.
 docker compose up --build
 ```
 
-The Compose file also binds LiteLLM to `127.0.0.1:${LITELLM_PORT:-4000}`. This
-keeps model endpoints private to the host while a local reverse proxy forwards
-authenticated HTTPS traffic to `127.0.0.1:${LITELLM_PORT:-4000}`.
+The Compose file binds LiteLLM to `127.0.0.1:${LITELLM_PORT:-4000}` on the host.
+Use this when your reverse proxy runs on the host and forwards authenticated
+HTTPS traffic to `127.0.0.1:${LITELLM_PORT:-4000}`. If your reverse proxy runs
+as a container in the same Compose project, forward to `http://proxy:4000`
+over the Compose network instead, and omit host port publishing when possible.
 
 ### Production ingress checklist
 
@@ -206,7 +208,10 @@ authenticated HTTPS traffic to `127.0.0.1:${LITELLM_PORT:-4000}`.
 - No public firewall/security group rule exposes `${LITELLM_PORT:-4000}`.
 - Docker publishes LiteLLM as `127.0.0.1:${LITELLM_PORT:-4000}:4000`, not
   `${LITELLM_PORT:-4000}:4000`.
-- Caddy/nginx forwards HTTPS requests to `127.0.0.1:${LITELLM_PORT:-4000}`.
+- Host-based Caddy/nginx forwards HTTPS requests to
+  `127.0.0.1:${LITELLM_PORT:-4000}`.
+- Containerized reverse proxies in the same Compose stack forward to
+  `http://proxy:4000` over the Docker network.
 - `/v1/messages` rejects requests without `Authorization: Bearer
   <LITELLM_MASTER_KEY>`.
 - External requests to `http://<host>:${LITELLM_PORT:-4000}` fail or time out.
