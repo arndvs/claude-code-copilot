@@ -197,7 +197,7 @@ docker compose up --build
 
 The Compose file also binds LiteLLM to `127.0.0.1:${LITELLM_PORT:-4000}`. This
 keeps model endpoints private to the host while a local reverse proxy forwards
-authenticated HTTPS traffic to `127.0.0.1:4000`.
+authenticated HTTPS traffic to `127.0.0.1:${LITELLM_PORT:-4000}`.
 
 ### Production ingress checklist
 
