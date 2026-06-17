@@ -1,9 +1,9 @@
 # claude-code-copilot
 
-Route Claude Code through your GitHub Copilot subscription via a local LiteLLM proxy. No separate Anthropic API key required.
+Route Claude Code through your GitHub Copilot subscription via a secure LiteLLM proxy (local or hosted). No separate Anthropic API key required.
 
 ```
-Claude Code → LiteLLM proxy (localhost:4000) → GitHub Copilot API
+Claude Code → LiteLLM proxy (local or hosted) → GitHub Copilot API
 ```
 
 ## Why this exists
@@ -31,7 +31,7 @@ This is the **infrastructure layer** for [ctrlshft](https://github.com/arndvs/ct
 
 **Standalone use works too** — you don't need ctrlshft. The Makefile provides the full workflow: `make setup && make claude-enable && make start`.
 
-> **Compliance note:** This is an unofficial local-proxy workaround, not a GitHub-promoted workflow. Review the [GitHub Copilot Terms of Service](https://docs.github.com/en/site-policy/github-terms/github-terms-for-additional-products-and-features#github-copilot) and usage limits before using in production.
+> **Compliance note:** This is an unofficial proxy workaround, not a GitHub-promoted workflow. Review the [GitHub Copilot Terms of Service](https://docs.github.com/en/site-policy/github-terms/github-terms-for-additional-products-and-features#github-copilot) and usage limits before using in production.
 
 Inspired by [kjetiljd/claude-code-over-github-copilot](https://github.com/kjetiljd/claude-code-over-github-copilot) and [NationalBankBelgium/litellm-claude-code-proxy](https://github.com/NationalBankBelgium/litellm-claude-code-proxy).
 
