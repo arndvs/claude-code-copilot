@@ -1,6 +1,6 @@
 # Hosted Deployment (AWS EC2)
 
-A concrete, end-to-end walkthrough for running this proxy as a hosted HTTPS endpoint on a single AWS EC2 instance, fronted by Caddy for TLS. This is the worked example behind the README's [Production ingress checklist](https://claude.ai/README.md#production-ingress-checklist).
+A concrete, end-to-end walkthrough for running this proxy as a hosted HTTPS endpoint on a single AWS EC2 instance, fronted by Caddy for TLS. This is the worked example behind the README's [Production ingress checklist](../README.md#production-ingress-checklist).
 
 For the general security model (localhost binding, bearer auth, no public proxy port), see that checklist — it is not repeated in full here.
 
