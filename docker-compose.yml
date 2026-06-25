@@ -10,7 +10,7 @@ services:
       - "127.0.0.1:${LITELLM_PORT:-4000}:4000"
     env_file: .env
     environment:
-      - LITELLM_LOCAL_MODEL_COST_MAP=true
+      LITELLM_LOCAL_MODEL_COST_MAP: "true"
     volumes:
       # Mount cached GitHub Copilot OAuth token
       - ${HOME}/.config/litellm/github_copilot:/root/.config/litellm/github_copilot:rw

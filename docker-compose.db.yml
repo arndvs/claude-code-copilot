@@ -13,7 +13,7 @@
 services:
   proxy:
     environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-litellm}:${POSTGRES_PASSWORD:-litellm}@db:5432/${POSTGRES_DB:-litellm}
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-litellm}:${POSTGRES_PASSWORD:-litellm}@db:5432/${POSTGRES_DB:-litellm}"
     depends_on:
       db:
         condition: service_healthy
