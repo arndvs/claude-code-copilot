@@ -108,6 +108,64 @@ def _extract(response_obj):
     return finish, content_len, ctoks
 
 
+def _extract_http_info(kwargs):
+    """Return dict with ``http_status`` (int|None) and optional ``ratelimit``.
+
+    Extracts from ``kwargs["original_response"]`` (an httpx.Response) first,
+    falling back to ``kwargs["exception"]`` which may carry ``.status_code``
+    and ``.headers``.
+
+    The ``ratelimit`` key is **omitted** when no ``x-ratelimit-*`` headers are
+    present, keeping normal log lines compact.
+
+    All code is wrapped in try/except — extraction failures degrade to
+    ``{"http_status": None}`` rather than raising.
+    """
+    result = {"http_status": None}
+    try:
+        if not isinstance(kwargs, dict):
+            return result
+
+        # --- Locate the response-like object ---
+        source = None
+        for key in ("original_response", "exception"):
+            candidate = kwargs.get(key)
+            if candidate is not None and hasattr(candidate, "status_code"):
+                source = candidate
+                break
+
+        if source is None:
+            return result
+
+        # --- status code ---
+        try:
+            status_code = source.status_code
+            if isinstance(status_code, int):
+                result["http_status"] = status_code
+        except Exception:
+            pass
+
+        # --- ratelimit headers ---
+        try:
+            headers = source.headers
+            if headers:
+                rl = {}
+                for name, value in (
+                    headers.items() if hasattr(headers, "items") else []
+                ):
+                    lower = name.lower()
+                    if lower.startswith("x-ratelimit-"):
+                        rl[lower[len("x-ratelimit-"):]] = value
+                if rl:
+                    result["ratelimit"] = rl
+        except Exception:
+            pass
+
+    except Exception:
+        pass
+    return result
+
+
 def _emit(kwargs, response_obj, start_time, end_time, status):
     try:
         rec = {"t": "proxy_log", "status": status}
@@ -124,6 +182,12 @@ def _emit(kwargs, response_obj, start_time, end_time, status):
         rec["upstream_empty"] = bool(
             status == "success" and (content_len == 0 or ctoks == 0)
         )
+
+        # HTTP status code and rate-limit headers from the upstream response.
+        http_info = _extract_http_info(kwargs)
+        rec["http_status"] = http_info.get("http_status")
+        if "ratelimit" in http_info:
+            rec["ratelimit"] = http_info["ratelimit"]
 
         print("PROXY_LOG " + json.dumps(rec, default=str), file=sys.stdout, flush=True)
     except Exception:
