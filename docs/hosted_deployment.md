@@ -151,7 +151,7 @@ Notes:
 - `-p 127.0.0.1:4000:4000` binds to **localhost only** — the proxy is never directly internet-reachable. Verify with `ss -tlnp | grep 4000` (expect `127.0.0.1:4000`, not `0.0.0.0:4000`).
 - `--restart unless-stopped` brings the container back automatically after a reboot or crash.
 - **Changing env vars (e.g. rotating the key) requires** `docker rm -f` **+ a fresh** `docker run`**, not** `docker restart` — a restart reuses the original environment and will keep serving the old key. See §7.
-- This single-container run is **DB-less**, and so is the default `docker compose up` — the proxy needs no database for master-key auth and static model routing. To enable the optional spend-tracking Postgres, layer the overlay: `docker compose -f docker-compose.yml -f docker-compose.db.yml up`. Never set `DATABASE_URL` without starting that `db` service, or LiteLLM enters DB mode with no reachable database and returns `400 "No connected db"` on every request. (The image already includes `prisma` for the DB-mode path.)
+- This single-container run is **DB-less**, and so is the default `docker compose up` — the proxy needs no database for master-key auth and static model routing. To enable the optional spend-tracking Postgres, layer the overlay: `docker compose -f docker-compose.yml -f docker-compose.db.yml up --build`. Never set `DATABASE_URL` without starting that `db` service, or LiteLLM enters DB mode with no reachable database and returns `400 "No connected db"` on every request. (The image already includes `prisma` for the DB-mode path.)
 
 ---
 
