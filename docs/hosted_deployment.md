@@ -217,7 +217,7 @@ python3 -c "import uuid; open('.env','w').write('LITELLM_MASTER_KEY=sk-'+str(uui
 chmod 600 .env
 
 # Recreate (NOT restart) so the new key is picked up:
-docker rm -f proxy
+docker rm -f proxy 2>/dev/null || true
 docker run -d --name proxy --restart unless-stopped \
   --env-file .env \
   -v "$HOME/.config/litellm/github_copilot:/root/.config/litellm/github_copilot:rw" \
@@ -229,10 +229,11 @@ docker run -d --name proxy --restart unless-stopped \
 Then update Parameter Store (from CloudShell) with the new value and update any clients' `ANTHROPIC_AUTH_TOKEN`.
 
 This box has two deploy models. **Build-on-box** (below) pulls the repo and
-rebuilds the image on the instance — simplest, and reproducible now that the
-`Dockerfile` pins its dependencies. **Immutable ECR image** (further below) is
-recommended for production: build once, push to ECR, then pull a frozen image —
-no on-box build, no dependency drift, instant rollback.
+rebuilds the image on the instance — simplest, and less prone to dependency drift
+now that the `Dockerfile` pins the LiteLLM + Prisma versions (the base image and
+OS still track upstream). **Immutable ECR image** (further below) is recommended
+for production: build once, push to ECR, then pull a frozen image — no on-box
+build, no dependency drift, instant rollback.
 
 ### Redeploy after a repo update (build on the box)
 
@@ -240,7 +241,7 @@ no on-box build, no dependency drift, instant rollback.
 cd /opt/claude-code-copilot
 git fetch origin && git reset --hard origin/main   # or your deploy branch
 docker build -t claude-code-copilot-proxy:latest .
-docker rm -f proxy
+docker rm -f proxy 2>/dev/null || true
 docker run -d --name proxy --restart unless-stopped \
   --env-file .env \
   -v "$HOME/.config/litellm/github_copilot:/root/.config/litellm/github_copilot:rw" \
@@ -306,7 +307,7 @@ aws ecr get-login-password --region $REGION | \
 docker pull $ECR_URI:$TAG
 
 # Recreate the container against the pulled image (env + token are box-local):
-docker rm -f proxy
+docker rm -f proxy 2>/dev/null || true
 docker run -d --name proxy --restart unless-stopped \
   --env-file .env \
   -v "$HOME/.config/litellm/github_copilot:/root/.config/litellm/github_copilot:rw" \
@@ -318,7 +319,7 @@ docker run -d --name proxy --restart unless-stopped \
 
 ```bash
 docker pull $ECR_URI:<previous-sha>
-docker rm -f proxy
+docker rm -f proxy 2>/dev/null || true
 docker run -d --name proxy --restart unless-stopped \
   --env-file .env \
   -v "$HOME/.config/litellm/github_copilot:/root/.config/litellm/github_copilot:rw" \
