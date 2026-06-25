@@ -309,10 +309,12 @@ alternating the two endpoints:
 for i in $(seq 1 6); do
   M=$(curl -s -X POST https://<proxy-host>/v1/messages \
       -H "Authorization: Bearer $KEY" -H "anthropic-version: 2023-06-01" \
+      -H "content-type: application/json" \
       -d '{"model":"claude-sonnet-4-6","max_tokens":64,"messages":[{"role":"user","content":"pong"}]}' \
       | jq -r '[.content[]?.text] | add // "<EMPTY>"')
   C=$(curl -s -X POST https://<proxy-host>/v1/chat/completions \
       -H "Authorization: Bearer $KEY" \
+      -H "content-type: application/json" \
       -d '{"model":"claude-sonnet-4-6","max_tokens":64,"messages":[{"role":"user","content":"pong"}]}' \
       | jq -r '.choices[0].message.content // "<EMPTY>"')
   echo "round $i: messages=[$M] chat=[$C]"
