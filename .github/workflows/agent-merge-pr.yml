@@ -1,0 +1,101 @@
+name: "Agent: Merge PR"
+
+on:
+  pull_request_target:
+    types: [labeled]
+
+jobs:
+  refuse-fork:
+    if: github.event.label.name == 'agent:merge' && github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
+
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      GITHUB_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Block unsafe fork execution
+        run: |
+          gh pr edit "$PR_NUMBER" --remove-label "agent:merge" -R ${{ github.repository }} || true
+          gh pr edit "$PR_NUMBER" --add-label "agent:blocked" -R ${{ github.repository }} || true
+          gh pr comment "$PR_NUMBER" -R ${{ github.repository }} --body "Refused to run \`agent:merge\`: this workflow uses \`pull_request_target\` and cannot safely execute agent code for fork PRs. Recreate the PR from a branch in this repository, or merge manually after review."
+
+  merge:
+    if: github.event.label.name == 'agent:merge' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: agent-mutate-pr-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+
+    steps:
+      - name: Transition labels
+        env:
+          GITHUB_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr edit "$PR_NUMBER" --remove-label "agent:merge" -R ${{ github.repository }} || true
+          gh pr edit "$PR_NUMBER" --remove-label "agent:blocked" -R ${{ github.repository }} || true
+          gh pr edit "$PR_NUMBER" --add-label "agent:in-progress" -R ${{ github.repository }}
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install engine dependencies
+        run: |
+          corepack enable
+          cd .sandcastle/engine
+          npm install
+          echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+
+      - name: Run merge
+        env:
+          GITHUB_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+          ANTHROPIC_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.LITELLM_MASTER_KEY }}
+        run: |
+          ./.sandcastle/engine/node_modules/.bin/tsx .sandcastle/run.ts merge-pr \
+            --pr ${{ github.event.pull_request.number }}
+
+      - name: Mark blocked on failure
+        if: failure()
+        env:
+          GITHUB_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          reason="(no reason file written — check workflow logs)"
+          if [ -f "${RUNNER_TEMP}/failure_reason.txt" ]; then
+            reason=$(cat "${RUNNER_TEMP}/failure_reason.txt")
+          fi
+          gh pr edit "$PR_NUMBER" --add-label "agent:blocked" -R ${{ github.repository }} || true
+          gh pr comment "$PR_NUMBER" -R ${{ github.repository }} --body "$(cat <<EOF
+          \`agent:merge\` run failed.
+          **Reason:** $reason
+          **Workflow run:** $RUN_URL
+          Re-add \`agent:merge\` to retry.
+          EOF
+          )"
+
+      - name: Remove in-progress label
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr edit "$PR_NUMBER" --remove-label "agent:in-progress" -R ${{ github.repository }} || true

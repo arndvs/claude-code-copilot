@@ -1,0 +1,102 @@
+name: "Agent: Plan Issue"
+
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  plan:
+    if: github.event.label.name == 'agent:review'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: agent-plan-issue-${{ github.event.issue.number }}
+      cancel-in-progress: false
+
+    permissions:
+      contents: read
+      issues: write
+
+    env:
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+
+    steps:
+      - name: Transition labels
+        env:
+          GITHUB_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue edit "$ISSUE_NUMBER" --remove-label "agent:review" -R ${{ github.repository }} || true
+          gh issue edit "$ISSUE_NUMBER" --remove-label "agent:blocked" -R ${{ github.repository }} || true
+          gh issue edit "$ISSUE_NUMBER" --add-label "agent:in-progress" -R ${{ github.repository }}
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install engine dependencies
+        run: |
+          corepack enable
+          cd .sandcastle/engine
+          npm install
+          echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+
+      - name: Run plan
+        env:
+          GITHUB_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+          ANTHROPIC_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.LITELLM_MASTER_KEY }}
+        run: |
+          ./.sandcastle/engine/node_modules/.bin/tsx .sandcastle/run.ts plan-issue \
+            --issue "$ISSUE_NUMBER"
+
+      - name: Transition label
+        if: success()
+        env:
+          AGENT_PAT: ${{ secrets.AGENT_PAT }}
+        run: |
+          if [ -z "$AGENT_PAT" ]; then
+            echo "AGENT_PAT is required to add agent:implement because GITHUB_TOKEN-created labels do not trigger workflows." > "${RUNNER_TEMP}/failure_reason.txt"
+            exit 1
+          fi
+          set +e
+          GH_TOKEN="$AGENT_PAT" gh issue edit "$ISSUE_NUMBER" \
+            --add-label "agent:implement" \
+            -R ${{ github.repository }}
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo "AGENT_PAT failed to add agent:implement (status $status)." > "${RUNNER_TEMP}/failure_reason.txt"
+            exit 1
+          fi
+
+      - name: Mark blocked on failure
+        if: failure()
+        env:
+          GITHUB_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          reason="(no reason file written — check workflow logs)"
+          if [ -f "${RUNNER_TEMP}/failure_reason.txt" ]; then
+            reason=$(cat "${RUNNER_TEMP}/failure_reason.txt")
+          fi
+          gh issue edit "$ISSUE_NUMBER" --add-label "agent:blocked" -R ${{ github.repository }} || true
+          gh issue comment "$ISSUE_NUMBER" -R ${{ github.repository }} --body "$(cat <<EOF
+          \`agent:review\` plan run failed.
+          **Reason:** $reason
+          **Workflow run:** $RUN_URL
+          Re-add \`agent:review\` to retry.
+          EOF
+          )"
+
+      - name: Remove in-progress label
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue edit "$ISSUE_NUMBER" --remove-label "agent:in-progress" -R ${{ github.repository }} || true
