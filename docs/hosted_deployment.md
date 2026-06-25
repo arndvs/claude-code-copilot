@@ -300,7 +300,7 @@ docker push $ECR_URI:latest
 ```bash
 ACCOUNT=<account>; REGION=<region>; REPO=claude-code-copilot-proxy
 ECR_URI=$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/$REPO
-TAG=<commit-sha>            # pin to an exact build; avoid 'latest' in prod
+TAG=<image-tag-from-step-2>   # the exact tag you pushed (e.g. the short git SHA); avoid 'latest' in prod
 
 aws ecr get-login-password --region $REGION | \
   docker login --username AWS --password-stdin $ACCOUNT.dkr.ecr.$REGION.amazonaws.com
