@@ -19,6 +19,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install PyYAML
+        run: pip install pyyaml
+
       - name: Probe each configured alias through the proxy
         id: probe
         env:
@@ -34,6 +41,12 @@ jobs:
 
           # All explicit aliases except the '*' wildcard.
           aliases=$(python3 -c "import yaml; d=yaml.safe_load(open('litellm_config.yaml')); print('\n'.join(m['model_name'] for m in d.get('model_list',[]) if m.get('model_name') and m['model_name'] != '*'))")
+          # Fail fast: a parse error or missing PyYAML yields an empty list, which
+          # would otherwise sail through below as "all healthy" (a false green).
+          if [ -z "$(printf '%s' "$aliases" | tr -d '[:space:]')" ]; then
+            echo "::error::No aliases extracted from litellm_config.yaml (parse error or empty model_list)"
+            exit 1
+          fi
           echo "Aliases under test:"; echo "$aliases" | sed 's/^/  /'
 
           broken=""
