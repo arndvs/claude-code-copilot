@@ -15,6 +15,13 @@ COPY litellm_logger.py .
 
 EXPOSE 4000
 
+# Version metadata baked at build time (consumed by /health/version endpoint).
+# Defaults to "unknown" so builds without --build-arg don't break.
+ARG GIT_SHA=unknown
+ARG BUILD_TIMESTAMP=unknown
+ENV GIT_SHA=$GIT_SHA
+ENV BUILD_TIMESTAMP=$BUILD_TIMESTAMP
+
 # /app on the import path so litellm can load the litellm_logger callback module.
 ENV PYTHONPATH=/app
 ENV UV_NATIVE_TLS=true
