@@ -132,7 +132,7 @@ else
     fail "Missing proxy-canary schedule (every 30 min)"
 fi
 
-if grep -qi "daily\|13:00" "$FILE"; then
+if grep -Eqi 'daily|13:00' "$FILE"; then
     pass "Model-health schedule referenced"
 else
     fail "Missing model-health schedule (daily)"
