@@ -56,6 +56,11 @@ jobs:
             etype=$(python3 -c "import json; print(json.load(open('/tmp/msg.json')).get('error',{}).get('type',''))" 2>/dev/null || true)
             case "$code" in
               200)
+                # A non-JSON 200 on /v1/messages is a hard proxy/upstream bug, not the
+                # transient empty-content quirk — page on it instead of masking as degraded.
+                if ! python3 -c "import json; json.load(open('/tmp/msg.json'))" 2>/dev/null; then
+                  hard="200 but response body was not valid JSON — proxy/upstream serving malformed completions"; break
+                fi
                 has=$(python3 -c "import json; d=json.load(open('/tmp/msg.json')); print('yes' if d.get('content') else 'no')" 2>/dev/null || echo no)
                 if [ "$has" = "yes" ]; then got=yes; echo "completion attempt $i/$attempts: 200 with content ✓"; break; fi
                 echo "completion attempt $i/$attempts: 200 but empty content — retrying" ;;
