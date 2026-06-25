@@ -60,7 +60,7 @@ jobs:
                 -H "anthropic-version: 2023-06-01" \
                 -H "content-type: application/json" \
                 -d "{\"model\":\"$m\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}" \
-                || echo 000)
+                || true)
               has=$(python3 -c "import json; d=json.load(open('/tmp/m.json')); print('yes' if d.get('content') else 'no')" 2>/dev/null || echo no)
               if [ "$code" = "200" ] && [ "$has" = "yes" ]; then ok=yes; break; fi
               sleep 4

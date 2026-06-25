@@ -34,7 +34,9 @@ jobs:
           fi
 
           # 1) readiness (no auth, must be 200)
-          code=$(curl -s -o /tmp/ready.txt -w '%{http_code}' --max-time 15 "$base/health/readiness" || echo 000)
+          # curl -w '%{http_code}' already writes 000 to stdout on failure; || echo 000 would
+          # produce code=000000, breaking the case branch. Use || true so curl's own 000 is kept.
+          code=$(curl -s -o /tmp/ready.txt -w '%{http_code}' --max-time 15 "$base/health/readiness" || true)
           echo "readiness: HTTP $code — $(cat /tmp/ready.txt 2>/dev/null)"
           [ "$code" = "200" ] || fail "readiness returned HTTP $code"
 
@@ -52,7 +54,7 @@ jobs:
               -H "anthropic-version: 2023-06-01" \
               -H "content-type: application/json" \
               -d '{"model":"claude-sonnet-4-6","max_tokens":64,"messages":[{"role":"user","content":"reply with the single word: pong"}]}' \
-              || echo 000)
+              || true)
             etype=$(python3 -c "import json; print(json.load(open('/tmp/msg.json')).get('error',{}).get('type',''))" 2>/dev/null || true)
             case "$code" in
               200)
