@@ -1,3 +1,8 @@
+# Default stack is DB-LESS — it mirrors the documented single-container hosted
+# deploy. The proxy needs no database for master-key auth + static model routing
+# (see litellm_config.yaml). To enable the OPTIONAL spend-tracking Postgres,
+# layer the overlay:
+#   docker compose -f docker-compose.yml -f docker-compose.db.yml up --build
 services:
   proxy:
     build: .
@@ -5,35 +10,13 @@ services:
       - "127.0.0.1:${LITELLM_PORT:-4000}:4000"
     env_file: .env
     environment:
-      - LITELLM_LOCAL_MODEL_COST_MAP=true
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-litellm}:${POSTGRES_PASSWORD:-litellm}@db:5432/${POSTGRES_DB:-litellm}
+      LITELLM_LOCAL_MODEL_COST_MAP: "true"
     volumes:
       # Mount cached GitHub Copilot OAuth token
       - ${HOME}/.config/litellm/github_copilot:/root/.config/litellm/github_copilot:rw
     restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import sys, urllib.request;\ntry: urllib.request.urlopen('http://localhost:4000/health/readiness', timeout=3)\nexcept Exception: sys.exit(1)"]
       interval: 30s
       timeout: 5s
       retries: 3
-
-  # Postgres — local development only. Override credentials in .env for production.
-  db:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-litellm}
-      POSTGRES_USER: ${POSTGRES_USER:-litellm}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-litellm}
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-volumes:
-  pgdata:

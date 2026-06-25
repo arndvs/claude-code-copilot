@@ -151,7 +151,7 @@ Notes:
 - `-p 127.0.0.1:4000:4000` binds to **localhost only** — the proxy is never directly internet-reachable. Verify with `ss -tlnp | grep 4000` (expect `127.0.0.1:4000`, not `0.0.0.0:4000`).
 - `--restart unless-stopped` brings the container back automatically after a reboot or crash.
 - **Changing env vars (e.g. rotating the key) requires** `docker rm -f` **+ a fresh** `docker run`**, not** `docker restart` — a restart reuses the original environment and will keep serving the old key. See §7.
-- This single-container run intentionally omits the database. The Compose stack adds Postgres for spend tracking; if you use it, the proxy image must include the `prisma` package (this repo's Dockerfile installs it) or LiteLLM fails to initialize the DB layer.
+- This single-container run is **DB-less**, and so is the default `docker compose up` — the proxy needs no database for master-key auth and static model routing. To enable the optional spend-tracking Postgres, layer the overlay: `docker compose -f docker-compose.yml -f docker-compose.db.yml up --build`. Never set `DATABASE_URL` without starting that `db` service, or LiteLLM enters DB mode with no reachable database and returns `400 "No connected db"` on every request. (The image already includes `prisma` for the DB-mode path.)
 
 ---
 
@@ -217,7 +217,7 @@ python3 -c "import uuid; open('.env','w').write('LITELLM_MASTER_KEY=sk-'+str(uui
 chmod 600 .env
 
 # Recreate (NOT restart) so the new key is picked up:
-docker rm -f proxy
+docker rm -f proxy 2>/dev/null || true
 docker run -d --name proxy --restart unless-stopped \
   --env-file .env \
   -v "$HOME/.config/litellm/github_copilot:/root/.config/litellm/github_copilot:rw" \
@@ -228,13 +228,20 @@ docker run -d --name proxy --restart unless-stopped \
 
 Then update Parameter Store (from CloudShell) with the new value and update any clients' `ANTHROPIC_AUTH_TOKEN`.
 
-### Redeploy after a repo update
+This box has two deploy models. **Build-on-box** (below) pulls the repo and
+rebuilds the image on the instance — simplest, and less prone to dependency drift
+now that the `Dockerfile` pins the LiteLLM + Prisma versions (the base image and
+OS still track upstream). **Immutable ECR image** (further below) is recommended
+for production: build once, push to ECR, then pull a frozen image — no on-box
+build, no dependency drift, instant rollback.
+
+### Redeploy after a repo update (build on the box)
 
 ```bash
 cd /opt/claude-code-copilot
 git fetch origin && git reset --hard origin/main   # or your deploy branch
 docker build -t claude-code-copilot-proxy:latest .
-docker rm -f proxy
+docker rm -f proxy 2>/dev/null || true
 docker run -d --name proxy --restart unless-stopped \
   --env-file .env \
   -v "$HOME/.config/litellm/github_copilot:/root/.config/litellm/github_copilot:rw" \
@@ -245,27 +252,92 @@ docker run -d --name proxy --restart unless-stopped \
 
 The `.env` and the OAuth token are outside git and are untouched by a redeploy.
 
-### Back up the image to ECR
+### Deploy via ECR (immutable image — recommended for production)
 
-A pushed image is a frozen, exact copy — no rebuild (and no dependency-version drift) needed to restore on a new host.
+The build-on-box redeploy rebuilds the image on the instance, re-resolving
+dependencies each time. The pinned `Dockerfile` makes that reproducible, but the
+most robust path is to build the image **once** (on a build host or in CI), push
+it to ECR, and have the box **pull a frozen image** — no on-box build, no
+dependency resolution, and instant rollback. The image bakes in
+`litellm_config.yaml`, so an ECR-deployed box needs only `.env` and the OAuth
+token mount — not a git checkout.
+
+**1. One-time — create the registry:**
 
 ```bash
-# one-time: create the repo (CloudShell)
+# CloudShell (write access)
 aws ecr create-repository --repository-name claude-code-copilot-proxy --region <region>
-
-# on the box
-ACCOUNT=<account>; REGION=<region>; REPO=claude-code-copilot-proxy
-ECR_URI=$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/$REPO
-aws ecr get-login-password --region $REGION | \
-  docker login --username AWS --password-stdin $ACCOUNT.dkr.ecr.$REGION.amazonaws.com
-docker tag claude-code-copilot-proxy:latest $ECR_URI:latest
-docker push $ECR_URI:latest
-
 ```
 
-The instance role needs `ecr:GetAuthorizationToken` (resource `*`) plus, scoped to the repo ARN: `ecr:BatchCheckLayerAvailability`, `ecr:BatchGetImage`, `ecr:GetDownloadUrlForLayer`, `ecr:PutImage`, `ecr:InitiateLayerUpload`, `ecr:UploadLayerPart`, `ecr:CompleteLayerUpload`. (`BatchGetImage` is required — the push performs a manifest existence check that fails with `403 Forbidden` without it.)
+Grant the **instance role** pull access — `ecr:GetAuthorizationToken` (resource
+`*`) plus, scoped to the repo ARN: `ecr:BatchCheckLayerAvailability`,
+`ecr:BatchGetImage`, `ecr:GetDownloadUrlForLayer`. A **build host / CI** that
+pushes additionally needs `ecr:PutImage`, `ecr:InitiateLayerUpload`,
+`ecr:UploadLayerPart`, `ecr:CompleteLayerUpload`. (`BatchGetImage` is required —
+the push performs a manifest existence check that fails with `403 Forbidden`
+without it.)
 
-To restore on any host: `docker login` to ECR as above, then `docker pull $ECR_URI:latest`.
+**2. Build and push (build host or CI):**
+
+```bash
+ACCOUNT=<account>; REGION=<region>; REPO=claude-code-copilot-proxy
+ECR_URI=$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/$REPO
+SHA=$(git rev-parse --short HEAD)
+
+aws ecr get-login-password --region $REGION | \
+  docker login --username AWS --password-stdin $ACCOUNT.dkr.ecr.$REGION.amazonaws.com
+
+docker build -t claude-code-copilot-proxy:$SHA .
+# Tag with the commit SHA (immutable — enables rollback) AND a moving latest:
+docker tag claude-code-copilot-proxy:$SHA $ECR_URI:$SHA
+docker tag claude-code-copilot-proxy:$SHA $ECR_URI:latest
+docker push $ECR_URI:$SHA
+docker push $ECR_URI:latest
+```
+
+**3. Deploy on the box (pull, don't build):**
+
+```bash
+ACCOUNT=<account>; REGION=<region>; REPO=claude-code-copilot-proxy
+ECR_URI=$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/$REPO
+TAG=<image-tag-from-step-2>   # the exact tag you pushed (e.g. the short git SHA); avoid 'latest' in prod
+
+aws ecr get-login-password --region $REGION | \
+  docker login --username AWS --password-stdin $ACCOUNT.dkr.ecr.$REGION.amazonaws.com
+docker pull $ECR_URI:$TAG
+
+# Recreate the container against the pulled image (env + token are box-local):
+docker rm -f proxy 2>/dev/null || true
+docker run -d --name proxy --restart unless-stopped \
+  --env-file .env \
+  -v "$HOME/.config/litellm/github_copilot:/root/.config/litellm/github_copilot:rw" \
+  -p "127.0.0.1:4000:4000" \
+  $ECR_URI:$TAG
+```
+
+**4. Roll back** — pull a previous SHA tag and recreate:
+
+```bash
+docker pull $ECR_URI:<previous-sha>
+docker rm -f proxy 2>/dev/null || true
+docker run -d --name proxy --restart unless-stopped \
+  --env-file .env \
+  -v "$HOME/.config/litellm/github_copilot:/root/.config/litellm/github_copilot:rw" \
+  -p "127.0.0.1:4000:4000" \
+  $ECR_URI:<previous-sha>
+```
+
+**5. Verify** after any deploy:
+
+```bash
+curl -s http://localhost:4000/health/readiness          # expect 200
+# then run check (A) from §7 with a valid key, from an external machine
+```
+
+> The `.env` and the OAuth token live outside git and the image, and survive
+> every deploy. Because the image is immutable and self-contained, rolling
+> forward or back is just a `docker pull` + recreate — the proxy is never
+> rebuilt on the box.
 
 ### Grow the disk (no downtime)
 
@@ -280,6 +352,76 @@ df -h /
 ```
 
 Prune Docker before a rebuild if space is tight: `docker builder prune -af && docker image prune -af`.
+
+### Observability & debugging empty completions
+
+The image ships a lightweight logging callback (`litellm_logger.py`, enabled via
+`litellm_settings.callbacks` in `litellm_config.yaml`) plus `json_logs: true`. For
+**every** completion it prints one metadata-only line — never message content — to
+stdout:
+
+```bash
+docker logs sandcastle-proxy 2>&1 | grep PROXY_LOG | tail
+# PROXY_LOG {"t":"proxy_log","status":"success","model":"claude-sonnet-4-6",
+#            "finish":"end_turn","content_len":4,"completion_tokens":4,"upstream_empty":false}
+```
+
+`upstream_empty: true` flags a `200` whose upstream completion returned no
+content — the signal to watch for.
+
+**Known issue — empty `/v1/messages` responses.** Copilot intermittently returns
+a `200` with empty content through the Anthropic `/v1/messages` endpoint. It has
+been **localized to LiteLLM's Anthropic-translation adapter**, not the upstream
+or the router: on the same server, the OpenAI `/v1/chat/completions` path (no
+translation) is reliable while `/v1/messages` occasionally empties. Reproduce by
+alternating the two endpoints:
+
+```bash
+# from a host with the master key — compare the two endpoints back to back
+PROXY_HOST="proxy.example.com"; KEY="<LITELLM_MASTER_KEY>"
+for i in $(seq 1 6); do
+  M=$(curl -s -X POST "https://$PROXY_HOST/v1/messages" \
+      -H "Authorization: Bearer $KEY" -H "anthropic-version: 2023-06-01" \
+      -H "content-type: application/json" \
+      -d '{"model":"claude-sonnet-4-6","max_tokens":64,"messages":[{"role":"user","content":"pong"}]}' \
+      | jq -r '[.content[]?.text] | add // "<EMPTY>"')
+  C=$(curl -s -X POST "https://$PROXY_HOST/v1/chat/completions" \
+      -H "Authorization: Bearer $KEY" \
+      -H "content-type: application/json" \
+      -d '{"model":"claude-sonnet-4-6","max_tokens":64,"messages":[{"role":"user","content":"pong"}]}' \
+      | jq -r '.choices[0].message.content // "<EMPTY>"')
+  echo "round $i: messages=[$M] chat=[$C]"
+done
+```
+
+Clients that can use the OpenAI endpoint are unaffected; for Anthropic clients
+(Claude Code) the mitigation is a client/agent-side retry — the CI canary in this
+repo treats a transient empty as a warning, not an outage.
+
+**Deep trace (temporary, on the box).** For a one-off, recreate the container
+with debug logging, capture an empty, then restore:
+
+```bash
+docker rm -f sandcastle-proxy 2>/dev/null || true
+docker run -d --name sandcastle-proxy --restart unless-stopped \
+  --env-file .env -e LITELLM_LOG=DEBUG \
+  -v "$HOME/.config/litellm/github_copilot:/root/.config/litellm/github_copilot:rw" \
+  -p "127.0.0.1:4000:4000" claude-code-copilot-proxy:latest
+# reproduce, read `docker logs sandcastle-proxy`, then re-run WITHOUT -e LITELLM_LOG=DEBUG
+```
+
+**Caddy access logs (host-local `Caddyfile`).** Add request-level visibility at
+the TLS front door:
+
+```caddyfile
+proxy.example.com {
+    log {
+        output file /var/log/caddy/access.log
+        format json
+    }
+    reverse_proxy 127.0.0.1:4000
+}
+```
 
 ---
 

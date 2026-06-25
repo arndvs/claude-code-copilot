@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Security regression tests
+        run: bash scripts/test_security.sh
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install PyYAML
+        run: pip install pyyaml
+
+      - name: Validate litellm_config.yaml parses
+        run: |
+          python3 -c "import yaml; yaml.safe_load(open('litellm_config.yaml')); print('litellm_config.yaml OK')"
+
+      - name: Validate compose config
+        run: |
+          # docker-compose.yml declares `env_file: .env`; newer Docker Compose hard-errors
+          # when it is missing. CI has no secrets, so a transient stub satisfies the
+          # file-existence check. Remove it on exit so it never enters the build context.
+          touch .env
+          trap 'rm -f .env' EXIT
+          docker compose -f docker-compose.yml config >/dev/null && echo "base compose OK (DB-less)"
+          if [ -f docker-compose.db.yml ]; then
+            docker compose -f docker-compose.yml -f docker-compose.db.yml config >/dev/null \
+              && echo "db overlay OK"
+          fi
+
+      - name: Docker build (proves the proxy image builds)
+        run: docker build -t claude-code-copilot-proxy:ci .
+
+      - name: Shellcheck
+        continue-on-error: true
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y shellcheck -qq
+          shellcheck scripts/*.sh start_proxy.sh

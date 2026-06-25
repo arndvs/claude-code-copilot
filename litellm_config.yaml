@@ -3,6 +3,12 @@ litellm_settings:
   num_retries: 3
   request_timeout: 120
   additional_drop_params: ["response_format", "thinking"]
+  # Structured JSON proxy logs + a lightweight observability callback that records
+  # each completion's upstream finish_reason / content length (metadata only, no
+  # message content). See litellm_logger.py.
+  json_logs: true
+  callbacks:
+    - litellm_logger.proxy_handler_instance
 
 model_list:
   # Claude Code sends hyphenated names; Copilot uses dotted names.
