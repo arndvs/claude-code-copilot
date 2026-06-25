@@ -306,13 +306,14 @@ alternating the two endpoints:
 
 ```bash
 # from a host with the master key — compare the two endpoints back to back
+PROXY_HOST="proxy.example.com"; KEY="<LITELLM_MASTER_KEY>"
 for i in $(seq 1 6); do
-  M=$(curl -s -X POST https://<proxy-host>/v1/messages \
+  M=$(curl -s -X POST "https://$PROXY_HOST/v1/messages" \
       -H "Authorization: Bearer $KEY" -H "anthropic-version: 2023-06-01" \
       -H "content-type: application/json" \
       -d '{"model":"claude-sonnet-4-6","max_tokens":64,"messages":[{"role":"user","content":"pong"}]}' \
       | jq -r '[.content[]?.text] | add // "<EMPTY>"')
-  C=$(curl -s -X POST https://<proxy-host>/v1/chat/completions \
+  C=$(curl -s -X POST "https://$PROXY_HOST/v1/chat/completions" \
       -H "Authorization: Bearer $KEY" \
       -H "content-type: application/json" \
       -d '{"model":"claude-sonnet-4-6","max_tokens":64,"messages":[{"role":"user","content":"pong"}]}' \
