@@ -65,6 +65,12 @@ jobs:
           npm install
           echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
 
+      - name: Mark PR ready (un-draft)
+        env:
+          GITHUB_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr ready "$PR_NUMBER" -R ${{ github.repository }} 2>/dev/null || true
+
       - name: Run merge
         env:
           GITHUB_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
