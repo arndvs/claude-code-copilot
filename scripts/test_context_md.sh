@@ -72,8 +72,8 @@ else
     fail "Token count: ~${tokens} exceeds 5500 limit"
 fi
 
-# ── Test 4: Accuracy against source files ─────────────────────
-echo "Test 4: Content accuracy"
+# ── Test 4: Drift guard (phrase checks) ─────────────────────
+echo "Test 4: Drift guard (phrase checks)"
 
 # 4a: Mentions the four required editor headers from litellm_config.yaml
 if grep -q "Editor-Version" "$FILE" && grep -q "Editor-Plugin-Version" "$FILE" \
@@ -84,7 +84,7 @@ else
 fi
 
 # 4b: Mentions the wildcard catch-all
-if grep -q 'wildcard\|"\*"' "$FILE"; then
+if grep -Eq 'wildcard|"[*]"' "$FILE"; then
     pass "References wildcard catch-all"
 else
     fail "Missing wildcard catch-all reference"
@@ -112,7 +112,7 @@ else
 fi
 
 # 4f: Mentions metadata-only / never logs content
-if grep -qi "metadata.only\|never.*content\|no.*message.*content" "$FILE"; then
+if grep -Eqi 'metadata.only|never.*content|no.*message.*content' "$FILE"; then
     pass "References metadata-only logging"
 else
     fail "Missing metadata-only logging reference"
@@ -126,7 +126,7 @@ else
 fi
 
 # 4h: CI workflow triggers are accurate
-if grep -q "every 30 min\|\\*/30" "$FILE"; then
+if grep -Eq 'every 30 min|[*]/30' "$FILE"; then
     pass "Proxy-canary schedule referenced"
 else
     fail "Missing proxy-canary schedule (every 30 min)"
@@ -139,7 +139,7 @@ else
 fi
 
 # 4i: Model name mapping — hyphenated → dotted
-if grep -q "hyphenated\|claude-sonnet\|dotted\|claude\.sonnet\|claude-opus" "$FILE"; then
+if grep -Eq 'hyphenated|claude-sonnet|dotted|claude[.]sonnet|claude-opus' "$FILE"; then
     pass "References model name format (hyphenated vs dotted)"
 else
     fail "Missing model name format reference"
