@@ -1,0 +1,108 @@
+name: Proxy canary
+
+# Continuously proves the hosted proxy serves real completions — the proxy
+# dogfooding its own health. Would have caught the #136-class outage.
+
+on:
+  schedule:
+    - cron: "*/30 * * * *" # every 30 min (GitHub may delay scheduled runs)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe hosted proxy (readiness + real completion)
+        id: probe
+        env:
+          BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
+          AUTH_TOKEN: ${{ secrets.LITELLM_MASTER_KEY }}
+        run: |
+          set -uo pipefail
+          fail() {
+            { echo "status=fail"; echo "detail=$1"; } >> "$GITHUB_OUTPUT"
+            echo "❌ $1"
+            exit 0
+          }
+          base="${BASE_URL%/}"
+          if [ -z "$base" ] || [ -z "${AUTH_TOKEN:-}" ]; then
+            fail "secrets LITELLM_BASE_URL / LITELLM_MASTER_KEY are not set on this repo"
+          fi
+
+          # 1) readiness (no auth, must be 200)
+          code=$(curl -s -o /tmp/ready.txt -w '%{http_code}' --max-time 15 "$base/health/readiness" || echo 000)
+          echo "readiness: HTTP $code — $(cat /tmp/ready.txt 2>/dev/null)"
+          [ "$code" = "200" ] || fail "readiness returned HTTP $code"
+
+          # 2) a real completion through the proxy.
+          #    HARD failures (auth / DB / 5xx / unreachable) page immediately.
+          #    Copilot also returns a 200 with EMPTY content in short bursts — an
+          #    upstream quirk, not a proxy outage — so retry across ~30s and, if
+          #    still empty, WARN rather than page (the proxy is up + authenticating).
+          attempts=5
+          got=no
+          hard=""
+          for i in $(seq 1 "$attempts"); do
+            code=$(curl -s -o /tmp/msg.json -w '%{http_code}' --max-time 60 -X POST "$base/v1/messages" \
+              -H "Authorization: Bearer $AUTH_TOKEN" \
+              -H "anthropic-version: 2023-06-01" \
+              -H "content-type: application/json" \
+              -d '{"model":"claude-sonnet-4-6","max_tokens":64,"messages":[{"role":"user","content":"reply with the single word: pong"}]}' \
+              || echo 000)
+            etype=$(python3 -c "import json; print(json.load(open('/tmp/msg.json')).get('error',{}).get('type',''))" 2>/dev/null || true)
+            case "$code" in
+              200)
+                has=$(python3 -c "import json; d=json.load(open('/tmp/msg.json')); print('yes' if d.get('content') else 'no')" 2>/dev/null || echo no)
+                if [ "$has" = "yes" ]; then got=yes; echo "completion attempt $i/$attempts: 200 with content ✓"; break; fi
+                echo "completion attempt $i/$attempts: 200 but empty content — retrying" ;;
+              401|403) hard="auth error HTTP $code${etype:+ (type=$etype)} — master key likely wrong/mismatched"; break ;;
+              400)     hard="HTTP 400${etype:+ (type=$etype)} — e.g. no_db_connection / bad request"; break ;;
+              000)     hard="connection failed — proxy unreachable"; break ;;
+              5*)      hard="upstream HTTP $code${etype:+ (type=$etype)}"; break ;;
+              *)       echo "completion attempt $i/$attempts: HTTP $code — retrying" ;;
+            esac
+            sleep 6
+          done
+
+          if [ -n "$hard" ]; then fail "$hard"; fi
+          if [ "$got" = "yes" ]; then
+            echo "status=ok" >> "$GITHUB_OUTPUT"
+            echo "✅ proxy canary passed (readiness + completion)"
+          else
+            echo "::warning::Proxy is up and authenticating, but upstream returned empty completions across $attempts retries (transient Copilot 'no choices'). Not paging."
+            echo "status=degraded" >> "$GITHUB_OUTPUT"
+            echo "⚠️ degraded: empty completions, but proxy + auth healthy"
+          fi
+
+      - name: Open or update the canary issue on failure
+        if: steps.probe.outputs.status == 'fail'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DETAIL: ${{ steps.probe.outputs.detail }}
+        run: |
+          title="🚨 Proxy canary failing"
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label proxy-canary \
+            --json number --jq '.[0].number // empty' 2>/dev/null || true)
+          body=$(printf '%s\n' \
+            "The hosted-proxy canary failed at $(date -u +%FT%TZ)." \
+            "" \
+            "**Detail:** ${DETAIL}" \
+            "" \
+            "Probes \`/health/readiness\` then a real \`/v1/messages\` completion. No secret values are logged." \
+            "" \
+            "Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}")
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh label create proxy-canary --repo "$GITHUB_REPOSITORY" --color B60205 \
+              --description "Hosted proxy health" 2>/dev/null || true
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --label proxy-canary --body "$body"
+          fi
+
+      - name: Mark the job failed
+        if: steps.probe.outputs.status == 'fail'
+        run: exit 1

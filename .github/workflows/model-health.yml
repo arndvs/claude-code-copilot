@@ -1,0 +1,97 @@
+name: Model health
+
+# Probes every model alias in litellm_config.yaml through the proxy and flags
+# when GitHub Copilot changes availability (e.g. the 'no choices' failure that
+# forced the sonnet -> opus-4.8 remap). Keeps the config honest.
+
+on:
+  schedule:
+    - cron: "0 13 * * *" # daily 13:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  model-health:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Probe each configured alias through the proxy
+        id: probe
+        env:
+          BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
+          AUTH_TOKEN: ${{ secrets.LITELLM_MASTER_KEY }}
+        run: |
+          set -uo pipefail
+          base="${BASE_URL%/}"
+          if [ -z "$base" ] || [ -z "${AUTH_TOKEN:-}" ]; then
+            echo "::error::LITELLM_BASE_URL / LITELLM_MASTER_KEY are not set on this repo"
+            exit 1
+          fi
+
+          # All explicit aliases except the '*' wildcard.
+          aliases=$(python3 -c "import yaml; d=yaml.safe_load(open('litellm_config.yaml')); print('\n'.join(m['model_name'] for m in d.get('model_list',[]) if m.get('model_name') and m['model_name'] != '*'))")
+          echo "Aliases under test:"; echo "$aliases" | sed 's/^/  /'
+
+          broken=""
+          while IFS= read -r m; do
+            [ -n "$m" ] || continue
+            # Retry to absorb transient empty-content blips from Copilot.
+            ok=no; code=000; has=no
+            for i in 1 2 3 4 5; do
+              code=$(curl -s -o /tmp/m.json -w '%{http_code}' --max-time 60 -X POST "$base/v1/messages" \
+                -H "Authorization: Bearer $AUTH_TOKEN" \
+                -H "anthropic-version: 2023-06-01" \
+                -H "content-type: application/json" \
+                -d "{\"model\":\"$m\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}" \
+                || echo 000)
+              has=$(python3 -c "import json; d=json.load(open('/tmp/m.json')); print('yes' if d.get('content') else 'no')" 2>/dev/null || echo no)
+              if [ "$code" = "200" ] && [ "$has" = "yes" ]; then ok=yes; break; fi
+              sleep 4
+            done
+            if [ "$ok" = "yes" ]; then
+              echo "  ✅ $m"
+            else
+              echo "  ❌ $m (HTTP $code, content=$has)"
+              broken="$broken $m"
+            fi
+          done <<< "$aliases"
+
+          if [ -n "$broken" ]; then
+            { echo "status=fail"; echo "broken=$broken"; } >> "$GITHUB_OUTPUT"
+          else
+            echo "status=ok" >> "$GITHUB_OUTPUT"
+            echo "All configured aliases are healthy."
+          fi
+
+      - name: Open or update the model-health issue
+        if: steps.probe.outputs.status == 'fail'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BROKEN: ${{ steps.probe.outputs.broken }}
+        run: |
+          title="⚠️ Model health: configured alias(es) failing through the proxy"
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label model-health \
+            --json number --jq '.[0].number // empty' 2>/dev/null || true)
+          body=$(printf '%s\n' \
+            "These \`litellm_config.yaml\` aliases failed a completion through the proxy at $(date -u +%FT%TZ):" \
+            "" \
+            "**Failing:**${BROKEN}" \
+            "" \
+            "Usually means GitHub Copilot changed model availability (the same 'no choices' class that forced the sonnet -> opus-4.8 remap). Update the alias targets in \`litellm_config.yaml\`." \
+            "" \
+            "Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}")
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh label create model-health --repo "$GITHUB_REPOSITORY" --color FBCA04 \
+              --description "Proxy model availability" 2>/dev/null || true
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --label model-health --body "$body"
+          fi
+
+      - name: Mark the job failed
+        if: steps.probe.outputs.status == 'fail'
+        run: exit 1
