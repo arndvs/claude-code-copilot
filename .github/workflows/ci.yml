@@ -31,6 +31,11 @@ jobs:
 
       - name: Validate compose config
         run: |
+          # docker-compose.yml declares `env_file: .env`; newer Docker Compose hard-errors
+          # when it is missing. CI has no secrets, so a transient stub satisfies the
+          # file-existence check. Remove it on exit so it never enters the build context.
+          touch .env
+          trap 'rm -f .env' EXIT
           docker compose -f docker-compose.yml config >/dev/null && echo "base compose OK (DB-less)"
           if [ -f docker-compose.db.yml ]; then
             docker compose -f docker-compose.yml -f docker-compose.db.yml config >/dev/null \
