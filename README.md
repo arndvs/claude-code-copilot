@@ -207,11 +207,24 @@ nginx, or another TLS reverse proxy in front of it and expose only `80/443`.
 > rotation, ECR backup, and disaster recovery), see
 > [docs/hosted_deployment.md](docs/hosted_deployment.md).
 
-### Docker Compose (with database for spend tracking)
+### Docker Compose
+
+The default stack is **DB-less** — the proxy needs no database for master-key
+auth and static model routing:
 
 ```bash
 docker compose up --build
 ```
+
+To add the **optional** spend-tracking Postgres, layer the database overlay:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.db.yml up --build
+```
+
+> Don't set `DATABASE_URL` without starting the `db` service — LiteLLM would
+> enter DB mode with no reachable database and return `400 "No connected db"`
+> on every request. The overlay wires both together.
 
 The Compose file binds LiteLLM to `127.0.0.1:${LITELLM_PORT:-4000}` on the host.
 Use this when your reverse proxy runs on the host and forwards authenticated
