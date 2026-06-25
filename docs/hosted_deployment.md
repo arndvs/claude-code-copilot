@@ -136,7 +136,10 @@ rm -rf ~/.config/litellm/github_copilot
 > **Mount the token read-write (**`:rw`**).** LiteLLM refreshes the Copilot token periodically and must write the new value back to `api-key.json`. A read-only (`:ro`) mount causes requests to start failing with a `Read-only file system … api-key.json` error once the token needs refreshing.
 
 ```bash
-docker build -t claude-code-copilot-proxy:latest .
+docker build \
+  --build-arg GIT_SHA=$(git rev-parse --short HEAD) \
+  --build-arg BUILD_TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+  -t claude-code-copilot-proxy:latest .
 
 docker run -d --name proxy --restart unless-stopped \
   --env-file .env \
@@ -148,6 +151,7 @@ docker run -d --name proxy --restart unless-stopped \
 
 Notes:
 
+- The `--build-arg` flags bake the git commit SHA and build timestamp into the image, exposed via `/health/version`.
 - `-p 127.0.0.1:4000:4000` binds to **localhost only** — the proxy is never directly internet-reachable. Verify with `ss -tlnp | grep 4000` (expect `127.0.0.1:4000`, not `0.0.0.0:4000`).
 - `--restart unless-stopped` brings the container back automatically after a reboot or crash.
 - **Changing env vars (e.g. rotating the key) requires** `docker rm -f` **+ a fresh** `docker run`**, not** `docker restart` — a restart reuses the original environment and will keep serving the old key. See §7.
@@ -240,7 +244,10 @@ build, no dependency drift, instant rollback.
 ```bash
 cd /opt/claude-code-copilot
 git fetch origin && git reset --hard origin/main   # or your deploy branch
-docker build -t claude-code-copilot-proxy:latest .
+docker build \
+  --build-arg GIT_SHA=$(git rev-parse --short HEAD) \
+  --build-arg BUILD_TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+  -t claude-code-copilot-proxy:latest .
 docker rm -f proxy 2>/dev/null || true
 docker run -d --name proxy --restart unless-stopped \
   --env-file .env \
@@ -287,7 +294,10 @@ SHA=$(git rev-parse --short HEAD)
 aws ecr get-login-password --region $REGION | \
   docker login --username AWS --password-stdin $ACCOUNT.dkr.ecr.$REGION.amazonaws.com
 
-docker build -t claude-code-copilot-proxy:$SHA .
+docker build \
+  --build-arg GIT_SHA=$(git rev-parse --short HEAD) \
+  --build-arg BUILD_TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+  -t claude-code-copilot-proxy:$SHA .
 # Tag with the commit SHA (immutable — enables rollback) AND a moving latest:
 docker tag claude-code-copilot-proxy:$SHA $ECR_URI:$SHA
 docker tag claude-code-copilot-proxy:$SHA $ECR_URI:latest
