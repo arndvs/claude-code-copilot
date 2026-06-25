@@ -34,7 +34,11 @@ except Exception:  # pragma: no cover - litellm is always present in the proxy i
 
 def _duration_ms(start_time, end_time):
     try:
-        return round((end_time - start_time).total_seconds() * 1000)
+        delta = end_time - start_time
+        # LiteLLM may pass numeric Unix timestamps (float/int) or datetime objects.
+        if isinstance(delta, (int, float)):
+            return round(delta * 1000)
+        return round(delta.total_seconds() * 1000)
     except Exception:
         return None
 
@@ -51,9 +55,11 @@ def _extract(response_obj):
     try:
         if isinstance(response_obj, dict):
             choices = response_obj.get("choices")
+            content_raw = response_obj.get("content")  # Anthropic /v1/messages format
             usage = response_obj.get("usage") or {}
         else:
             choices = getattr(response_obj, "choices", None)
+            content_raw = getattr(response_obj, "content", None)  # Anthropic /v1/messages format
             usage = getattr(response_obj, "usage", None) or {}
 
         if choices:
@@ -72,6 +78,27 @@ def _extract(response_obj):
                 content_len = 0
             else:
                 content_len = -1
+        elif content_raw is not None:
+            # Anthropic-style /v1/messages: content is a list of typed blocks
+            # e.g. [{"type": "text", "text": "..."}]. Extract text length so
+            # upstream_empty is accurate for the path we most care about.
+            if isinstance(content_raw, list):
+                text = "".join(
+                    (b.get("text", "") if isinstance(b, dict) else getattr(b, "text", ""))
+                    for b in content_raw
+                    if (isinstance(b, dict) and b.get("type") == "text")
+                    or (not isinstance(b, dict) and getattr(b, "type", None) == "text")
+                )
+                content_len = len(text)
+            elif isinstance(content_raw, str):
+                content_len = len(content_raw)
+            else:
+                content_len = 0
+            # Anthropic uses stop_reason where OpenAI uses finish_reason.
+            if isinstance(response_obj, dict):
+                finish = response_obj.get("stop_reason")
+            else:
+                finish = getattr(response_obj, "stop_reason", None)
 
         if isinstance(usage, dict):
             ctoks = usage.get("completion_tokens")
@@ -106,16 +133,16 @@ def _emit(kwargs, response_obj, start_time, end_time, status):
 
 
 class ProxyObservabilityLogger(CustomLogger):
-    def log_success_event(self, kwargs, response_obj, start_time, end_time):
+    def log_success_event(self, kwargs, response_obj, start_time, end_time, **extra_kwargs):
         _emit(kwargs, response_obj, start_time, end_time, "success")
 
-    def log_failure_event(self, kwargs, response_obj, start_time, end_time):
+    def log_failure_event(self, kwargs, response_obj, start_time, end_time, **extra_kwargs):
         _emit(kwargs, response_obj, start_time, end_time, "failure")
 
-    async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):
+    async def async_log_success_event(self, kwargs, response_obj, start_time, end_time, **extra_kwargs):
         _emit(kwargs, response_obj, start_time, end_time, "success")
 
-    async def async_log_failure_event(self, kwargs, response_obj, start_time, end_time):
+    async def async_log_failure_event(self, kwargs, response_obj, start_time, end_time, **extra_kwargs):
         _emit(kwargs, response_obj, start_time, end_time, "failure")
 
 
