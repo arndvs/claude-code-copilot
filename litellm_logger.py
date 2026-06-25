@@ -1,0 +1,149 @@
+"""litellm_logger.py — lightweight proxy observability callback.
+
+Emits ONE structured line per completion to stdout (captured by `docker logs`)
+so empty / degraded upstream responses can be correlated over time. It logs
+metadata ONLY — never message content — so it is safe to leave on in production.
+
+Enabled via `litellm_settings.callbacks: litellm_logger.proxy_handler_instance`
+in litellm_config.yaml. The file lives at the repo root so it is importable both
+inside the container (WORKDIR /app, PYTHONPATH=/app) and for local `make start`
+(run from the repo root).
+
+Design rule: every code path is defensive — a logging failure must NEVER affect
+request handling, so all work is wrapped in try/except and the callback degrades
+to a no-op rather than raising.
+
+Why this exists: empty `/v1/messages` completions were traced to LiteLLM's
+Anthropic-translation adapter (the OpenAI `/v1/chat/completions` path on the same
+server is reliable). This callback records the UPSTREAM completion's finish_reason
+and content length for every request, so when a client sees an empty response we
+can confirm from the logs whether the upstream actually returned content.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+
+try:
+    from litellm.integrations.custom_logger import CustomLogger
+except Exception:  # pragma: no cover - litellm is always present in the proxy image
+    class CustomLogger:  # type: ignore[no-redef]
+        """Fallback base so importing this module never fails the proxy."""
+
+
+def _duration_ms(start_time, end_time):
+    try:
+        delta = end_time - start_time
+        # LiteLLM may pass numeric Unix timestamps (float/int) or datetime objects.
+        if isinstance(delta, (int, float)):
+            return round(delta * 1000)
+        return round(delta.total_seconds() * 1000)
+    except Exception:
+        return None
+
+
+def _extract(response_obj):
+    """Return (finish_reason, content_len, completion_tokens) defensively.
+
+    content_len: length of the text content, 0 when empty/missing, -1 when the
+    content is a non-string (e.g. tool blocks).
+    """
+    finish = None
+    content_len = None
+    ctoks = None
+    try:
+        if isinstance(response_obj, dict):
+            choices = response_obj.get("choices")
+            content_raw = response_obj.get("content")  # Anthropic /v1/messages format
+            usage = response_obj.get("usage") or {}
+        else:
+            choices = getattr(response_obj, "choices", None)
+            content_raw = getattr(response_obj, "content", None)  # Anthropic /v1/messages format
+            usage = getattr(response_obj, "usage", None) or {}
+
+        if choices:
+            c0 = choices[0]
+            if isinstance(c0, dict):
+                finish = c0.get("finish_reason")
+                msg = c0.get("message") or {}
+                content = msg.get("content") if isinstance(msg, dict) else None
+            else:
+                finish = getattr(c0, "finish_reason", None)
+                msg = getattr(c0, "message", None)
+                content = getattr(msg, "content", None)
+            if isinstance(content, str):
+                content_len = len(content)
+            elif content in (None, ""):
+                content_len = 0
+            else:
+                content_len = -1
+        elif content_raw is not None:
+            # Anthropic-style /v1/messages: content is a list of typed blocks
+            # e.g. [{"type": "text", "text": "..."}]. Extract text length so
+            # upstream_empty is accurate for the path we most care about.
+            if isinstance(content_raw, list):
+                text = "".join(
+                    (b.get("text", "") if isinstance(b, dict) else getattr(b, "text", ""))
+                    for b in content_raw
+                    if (isinstance(b, dict) and b.get("type") == "text")
+                    or (not isinstance(b, dict) and getattr(b, "type", None) == "text")
+                )
+                content_len = len(text)
+            elif isinstance(content_raw, str):
+                content_len = len(content_raw)
+            else:
+                content_len = 0
+            # Anthropic uses stop_reason where OpenAI uses finish_reason.
+            if isinstance(response_obj, dict):
+                finish = response_obj.get("stop_reason")
+            else:
+                finish = getattr(response_obj, "stop_reason", None)
+
+        if isinstance(usage, dict):
+            ctoks = usage.get("completion_tokens")
+        else:
+            ctoks = getattr(usage, "completion_tokens", None)
+    except Exception:
+        pass
+    return finish, content_len, ctoks
+
+
+def _emit(kwargs, response_obj, start_time, end_time, status):
+    try:
+        rec = {"t": "proxy_log", "status": status}
+        if isinstance(kwargs, dict):
+            rec["model"] = kwargs.get("model")
+            rec["call_type"] = kwargs.get("call_type")
+        rec["ms"] = _duration_ms(start_time, end_time)
+
+        finish, content_len, ctoks = _extract(response_obj)
+        rec["finish"] = finish
+        rec["content_len"] = content_len
+        rec["completion_tokens"] = ctoks
+        # The key signal: a "successful" completion whose upstream content is empty.
+        rec["upstream_empty"] = bool(
+            status == "success" and (content_len == 0 or ctoks == 0)
+        )
+
+        print("PROXY_LOG " + json.dumps(rec, default=str), file=sys.stdout, flush=True)
+    except Exception:
+        # Observability must never break request handling.
+        pass
+
+
+class ProxyObservabilityLogger(CustomLogger):
+    def log_success_event(self, kwargs, response_obj, start_time, end_time, **extra_kwargs):
+        _emit(kwargs, response_obj, start_time, end_time, "success")
+
+    def log_failure_event(self, kwargs, response_obj, start_time, end_time, **extra_kwargs):
+        _emit(kwargs, response_obj, start_time, end_time, "failure")
+
+    async def async_log_success_event(self, kwargs, response_obj, start_time, end_time, **extra_kwargs):
+        _emit(kwargs, response_obj, start_time, end_time, "success")
+
+    async def async_log_failure_event(self, kwargs, response_obj, start_time, end_time, **extra_kwargs):
+        _emit(kwargs, response_obj, start_time, end_time, "failure")
+
+
+proxy_handler_instance = ProxyObservabilityLogger()
