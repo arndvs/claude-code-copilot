@@ -1,0 +1,31 @@
+{
+  "name": "shft-engine",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.33.2",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Vendored Sandcastle engine excludes test files; run the repo typecheck script (for example, pnpm run typecheck) to validate runtime sources.\"",
+    "typecheck": "tsc --noEmit",
+    "start": "echo 'Use workflow runners via .sandcastle/run.ts dispatcher'"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-code": "^2.1.172",
+    "@ai-hero/sandcastle": "^0.5.12",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.8"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@anthropic-ai/claude-code",
+      "@parcel/watcher",
+      "esbuild",
+      "msgpackr-extract"
+    ]
+  }
+}

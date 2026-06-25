@@ -1,0 +1,165 @@
+name: "Agent: Implement Issue"
+
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  implement:
+    if: github.event.label.name == 'agent:implement'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    concurrency:
+      group: agent-implement-issue-${{ github.event.issue.number }}
+      cancel-in-progress: false
+
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+
+    env:
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+      ISSUE_TITLE: ${{ github.event.issue.title }}
+
+    steps:
+      - name: Transition labels
+        env:
+          GITHUB_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue edit "$ISSUE_NUMBER" --remove-label "agent:implement" -R ${{ github.repository }} || true
+          gh issue edit "$ISSUE_NUMBER" --remove-label "agent:blocked" -R ${{ github.repository }} || true
+          gh issue edit "$ISSUE_NUMBER" --add-label "agent:in-progress" -R ${{ github.repository }}
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 0
+          token: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Compute branch name
+        id: branch
+        run: |
+          set -euo pipefail
+          slug=$(echo "$ISSUE_TITLE" \
+            | tr '[:upper:]' '[:lower:]' \
+            | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g' \
+            | cut -c1-50)
+          branch="agent/issue-${ISSUE_NUMBER}-${slug}"
+          echo "name=$branch" >> "$GITHUB_OUTPUT"
+
+      - name: Set up git identity and branch
+        env:
+          BRANCH: ${{ steps.branch.outputs.name }}
+        run: |
+          set -euo pipefail
+          git config user.name "claude-code[bot]"
+          git config user.email "claude-code[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            git fetch origin "$BRANCH"
+            git checkout -B "$BRANCH" "origin/$BRANCH"
+          else
+            git checkout -b "$BRANCH"
+          fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install engine dependencies
+        run: |
+          corepack enable
+          cd .sandcastle/engine
+          npm install
+          echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+
+      - name: Run implement
+        env:
+          GITHUB_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+          ANTHROPIC_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.LITELLM_MASTER_KEY }}
+          BRANCH: ${{ steps.branch.outputs.name }}
+        run: |
+          ./.sandcastle/engine/node_modules/.bin/tsx .sandcastle/run.ts implement-issue \
+            --issue "$ISSUE_NUMBER" \
+            --issue-title "$ISSUE_TITLE" \
+            --branch "$BRANCH"
+
+      - name: Push branch
+        if: success()
+        env:
+          BRANCH: ${{ steps.branch.outputs.name }}
+        run: git push origin "$BRANCH"
+
+      - name: Write PR title and description
+        if: success()
+        env:
+          GITHUB_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+          ANTHROPIC_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.LITELLM_MASTER_KEY }}
+          OUTPUT_DIR: ${{ runner.temp }}
+          BRANCH: ${{ steps.branch.outputs.name }}
+        run: |
+          ./.sandcastle/engine/node_modules/.bin/tsx .sandcastle/run.ts write-pr \
+            --issue "$ISSUE_NUMBER" \
+            --issue-title "$ISSUE_TITLE" \
+            --branch "$BRANCH"
+
+      - name: Open draft PR
+        if: success()
+        env:
+          GITHUB_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ steps.branch.outputs.name }}
+        run: |
+          set -euo pipefail
+          existing_pr=$(gh pr list -R ${{ github.repository }} --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$existing_pr" ]; then
+            echo "PR #${existing_pr} already exists for $BRANCH"
+            exit 0
+          fi
+          PR_TITLE=$(cat "${RUNNER_TEMP}/pr_title.txt")
+          PR_TITLE="${PR_TITLE:0:256}"
+          gh pr create \
+            -R ${{ github.repository }} \
+            --draft \
+            --base dev \
+            --head "$BRANCH" \
+            --title "$PR_TITLE" \
+            --body-file "${RUNNER_TEMP}/pr_description.txt"
+
+      - name: Transition label
+        if: success()
+        env:
+          GITHUB_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue edit "$ISSUE_NUMBER" \
+            --add-label "agent:pr-open" \
+            -R ${{ github.repository }}
+
+      - name: Mark blocked on failure
+        if: failure()
+        env:
+          GITHUB_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          reason="(no reason file written — check workflow logs)"
+          if [ -f "${RUNNER_TEMP}/failure_reason.txt" ]; then
+            reason=$(cat "${RUNNER_TEMP}/failure_reason.txt")
+          fi
+          gh issue edit "$ISSUE_NUMBER" --add-label "agent:blocked" -R ${{ github.repository }} || true
+          gh issue comment "$ISSUE_NUMBER" -R ${{ github.repository }} --body "$(cat <<EOF
+          \`agent:implement\` run failed.
+          **Reason:** $reason
+          **Workflow run:** $RUN_URL
+          Re-add \`agent:implement\` to retry.
+          EOF
+          )"
+
+      - name: Remove in-progress label
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue edit "$ISSUE_NUMBER" --remove-label "agent:in-progress" -R ${{ github.repository }} || true
