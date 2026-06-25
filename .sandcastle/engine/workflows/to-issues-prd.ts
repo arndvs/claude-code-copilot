@@ -137,7 +137,7 @@ export async function runToIssuesPrd(opts: { issueNumber: string; repoDir: strin
 
       console.log(`[to-issues-prd] Created #${newNumber}: ${slice.title}`);
 
-      execFileSync("gh", ["issue", "edit", String(newNumber), "--add-parent", issueNumber], {
+      execFileSync("gh", ["issue", "edit", issueNumber, "--add-sub-issue", String(newNumber)], {
         cwd: repoDir,
         stdio: ["ignore", "pipe", "pipe"],
       });
