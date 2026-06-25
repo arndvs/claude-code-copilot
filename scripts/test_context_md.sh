@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# test_context_md.sh — Validates CONTEXT.md structure, token limit, and accuracy
+# test_context_md.sh — Validates CONTEXT.md structure and size budget
 #
 # Checks:
 #   1. CONTEXT.md exists at repo root
-#   2. Contains all four required architecture sections
-#   3. Is under 5500 tokens (bytes/4 heuristic, same as check-file-tokens.sh)
-#   4. Content is accurate against actual source files
+#   2. Contains all four required architecture section headings
+#   3. Is under ~5500 tokens (bytes/4 heuristic; see .sandcastle/scripts/check-file-tokens.sh)
+#   4. Mentions key required facts (lightweight guard against drift)
 
 set -euo pipefail
 
@@ -35,28 +35,28 @@ fi
 echo "Test 2: Contains all four architecture sections"
 
 # Section 1: LiteLLM→Copilot routing
-if grep -qi "routing\|LiteLLM.*Copilot\|model.*mapping" "$FILE"; then
+if grep -Eq '^##[[:space:]]+1\.[[:space:]]+LiteLLM.*Copilot routing' "$FILE"; then
     pass "Section: LiteLLM→Copilot routing present"
 else
     fail "Section: LiteLLM→Copilot routing missing"
 fi
 
 # Section 2: DB-less default mode
-if grep -qi "DB-less\|database\|compose.*db\|docker-compose.db" "$FILE"; then
+if grep -Eq '^##[[:space:]]+2\.[[:space:]]+DB-less default mode' "$FILE"; then
     pass "Section: DB-less default mode present"
 else
     fail "Section: DB-less default mode missing"
 fi
 
 # Section 3: PROXY_LOG observability
-if grep -qi "PROXY_LOG\|observability\|litellm_logger" "$FILE"; then
+if grep -Eq '^##[[:space:]]+3\.[[:space:]]+Observability' "$FILE"; then
     pass "Section: PROXY_LOG observability present"
 else
     fail "Section: PROXY_LOG observability missing"
 fi
 
 # Section 4: CI workflows
-if grep -qi "ci.yml\|proxy-canary\|model-health" "$FILE"; then
+if grep -Eq '^##[[:space:]]+4\.[[:space:]]+CI workflows' "$FILE"; then
     pass "Section: CI workflows present"
 else
     fail "Section: CI workflows missing"
