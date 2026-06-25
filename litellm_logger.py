@@ -18,6 +18,11 @@ Anthropic-translation adapter (the OpenAI `/v1/chat/completions` path on the sam
 server is reliable). This callback records the UPSTREAM completion's finish_reason
 and content length for every request, so when a client sees an empty response we
 can confirm from the logs whether the upstream actually returned content.
+
+Streaming support: the logger also handles `log_stream_event` /
+`async_log_stream_event` callbacks for when routes are configured with
+`stream: true`. The `stream` field in log output lets operators correlate
+streaming mode with empty-content rates.
 """
 
 from __future__ import annotations
@@ -172,6 +177,9 @@ def _emit(kwargs, response_obj, start_time, end_time, status):
         if isinstance(kwargs, dict):
             rec["model"] = kwargs.get("model")
             rec["call_type"] = kwargs.get("call_type")
+            rec["stream"] = kwargs.get("stream") if "stream" in kwargs else None
+        else:
+            rec["stream"] = None
         rec["ms"] = _duration_ms(start_time, end_time)
 
         finish, content_len, ctoks = _extract(response_obj)
@@ -202,11 +210,17 @@ class ProxyObservabilityLogger(CustomLogger):
     def log_failure_event(self, kwargs, response_obj, start_time, end_time, **extra_kwargs):
         _emit(kwargs, response_obj, start_time, end_time, "failure")
 
+    def log_stream_event(self, kwargs, response_obj, start_time, end_time, **extra_kwargs):
+        _emit(kwargs, response_obj, start_time, end_time, "success")
+
     async def async_log_success_event(self, kwargs, response_obj, start_time, end_time, **extra_kwargs):
         _emit(kwargs, response_obj, start_time, end_time, "success")
 
     async def async_log_failure_event(self, kwargs, response_obj, start_time, end_time, **extra_kwargs):
         _emit(kwargs, response_obj, start_time, end_time, "failure")
+
+    async def async_log_stream_event(self, kwargs, response_obj, start_time, end_time, **extra_kwargs):
+        _emit(kwargs, response_obj, start_time, end_time, "success")
 
 
 proxy_handler_instance = ProxyObservabilityLogger()
