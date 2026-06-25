@@ -93,8 +93,7 @@ def _extract(response_obj):
             elif isinstance(content_raw, str):
                 content_len = len(content_raw)
             else:
-                content_len = 0
-            # Anthropic uses stop_reason where OpenAI uses finish_reason.
+                content_len = -1  # non-list/non-str: tool blocks etc — not "empty", matches docstring
             if isinstance(response_obj, dict):
                 finish = response_obj.get("stop_reason")
             else:
