@@ -281,6 +281,73 @@ df -h /
 
 Prune Docker before a rebuild if space is tight: `docker builder prune -af && docker image prune -af`.
 
+### Observability & debugging empty completions
+
+The image ships a lightweight logging callback (`litellm_logger.py`, enabled via
+`litellm_settings.callbacks` in `litellm_config.yaml`) plus `json_logs: true`. For
+**every** completion it prints one metadata-only line — never message content — to
+stdout:
+
+```bash
+docker logs sandcastle-proxy 2>&1 | grep PROXY_LOG | tail
+# PROXY_LOG {"t":"proxy_log","status":"success","model":"claude-sonnet-4-6",
+#            "finish":"end_turn","content_len":4,"completion_tokens":4,"upstream_empty":false}
+```
+
+`upstream_empty: true` flags a `200` whose upstream completion returned no
+content — the signal to watch for.
+
+**Known issue — empty `/v1/messages` responses.** Copilot intermittently returns
+a `200` with empty content through the Anthropic `/v1/messages` endpoint. It has
+been **localized to LiteLLM's Anthropic-translation adapter**, not the upstream
+or the router: on the same server, the OpenAI `/v1/chat/completions` path (no
+translation) is reliable while `/v1/messages` occasionally empties. Reproduce by
+alternating the two endpoints:
+
+```bash
+# from a host with the master key — compare the two endpoints back to back
+for i in $(seq 1 6); do
+  M=$(curl -s -X POST https://<proxy-host>/v1/messages \
+      -H "Authorization: Bearer $KEY" -H "anthropic-version: 2023-06-01" \
+      -d '{"model":"claude-sonnet-4-6","max_tokens":64,"messages":[{"role":"user","content":"pong"}]}' \
+      | jq -r '[.content[]?.text] | add // "<EMPTY>"')
+  C=$(curl -s -X POST https://<proxy-host>/v1/chat/completions \
+      -H "Authorization: Bearer $KEY" \
+      -d '{"model":"claude-sonnet-4-6","max_tokens":64,"messages":[{"role":"user","content":"pong"}]}' \
+      | jq -r '.choices[0].message.content // "<EMPTY>"')
+  echo "round $i: messages=[$M] chat=[$C]"
+done
+```
+
+Clients that can use the OpenAI endpoint are unaffected; for Anthropic clients
+(Claude Code) the mitigation is a client/agent-side retry — the CI canary in this
+repo treats a transient empty as a warning, not an outage.
+
+**Deep trace (temporary, on the box).** For a one-off, recreate the container
+with debug logging, capture an empty, then restore:
+
+```bash
+docker rm -f sandcastle-proxy
+docker run -d --name sandcastle-proxy --restart unless-stopped \
+  --env-file .env -e LITELLM_LOG=DEBUG \
+  -v "$HOME/.config/litellm/github_copilot:/root/.config/litellm/github_copilot:rw" \
+  -p "127.0.0.1:4000:4000" claude-code-copilot-proxy:latest
+# reproduce, read `docker logs sandcastle-proxy`, then re-run WITHOUT -e LITELLM_LOG=DEBUG
+```
+
+**Caddy access logs (host-local `Caddyfile`).** Add request-level visibility at
+the TLS front door:
+
+```caddyfile
+proxy.example.com {
+    log {
+        output file /var/log/caddy/access.log
+        format json
+    }
+    reverse_proxy 127.0.0.1:4000
+}
+```
+
 ---
 
 ## Model selection note
