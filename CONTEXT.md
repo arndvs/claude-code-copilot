@@ -59,7 +59,7 @@ docker compose -f docker-compose.yml -f docker-compose.db.yml up --build
 | `finish` | Upstream `finish_reason` / `stop_reason` |
 | `content_len` | Text content length (0 = empty, −1 = non-string) |
 | `completion_tokens` | Token count from usage |
-| `upstream_empty` | `true` when status=success but content is empty |
+| `upstream_empty` | `true` when status=success and (content_len=0 or completion_tokens=0) |
 | `status` | `success` or `failure` |
 
 **Design rules:**
