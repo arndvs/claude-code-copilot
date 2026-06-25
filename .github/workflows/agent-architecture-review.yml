@@ -1,0 +1,112 @@
+name: "Agent: Architecture Review"
+
+on:
+  schedule:
+    # 09:00 UTC, Monday-Friday. GitHub may delay scheduled runs under load.
+    - cron: "0 9 * * 1-5"
+  workflow_dispatch:
+
+jobs:
+  architecture-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: agent-architecture-review
+      cancel-in-progress: false
+
+    permissions:
+      contents: read
+      issues: write
+
+    env:
+      GH_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install engine dependencies
+        run: |
+          corepack enable
+          cd .sandcastle/engine
+          npm install
+          echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+
+      - name: Run architecture review
+        env:
+          ANTHROPIC_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.LITELLM_MASTER_KEY }}
+          OUTPUT_DIR: ${{ runner.temp }}
+        run: ./.sandcastle/engine/node_modules/.bin/tsx .sandcastle/run.ts architecture-review
+
+      - name: Publish PRD issue
+        id: publish
+        env:
+          OUTPUT_FILE: ${{ runner.temp }}/architecture_review_output.json
+          TITLE_FILE: ${{ runner.temp }}/prd_title.txt
+          BODY_FILE: ${{ runner.temp }}/prd_body.md
+          LABEL: source:architecture-review
+        run: |
+          set -euo pipefail
+          status=$(jq -r '.status' "$OUTPUT_FILE")
+          if [ "$status" != "proposed" ]; then
+            echo "Status is '$status' — nothing to publish."
+            exit 0
+          fi
+
+          title=$(cat "$TITLE_FILE")
+          gh label create "$LABEL" \
+            --color "5319E7" \
+            --description "PRDs proposed by the automated architecture-review workflow" \
+            >/dev/null 2>&1 || true
+
+          issue_url=$(gh issue create \
+            --title "$title" \
+            --body-file "$BODY_FILE" \
+            --label "$LABEL" | tail -n1)
+          issue_number=$(basename "$issue_url")
+
+          echo "issue_url=$issue_url" >> "$GITHUB_OUTPUT"
+          echo "issue_number=$issue_number" >> "$GITHUB_OUTPUT"
+          echo "Published #${issue_number}: ${issue_url}"
+
+      - name: Summarise run
+        if: always()
+        env:
+          OUTPUT_FILE: ${{ runner.temp }}/architecture_review_output.json
+        run: |
+          if [ ! -f "$OUTPUT_FILE" ]; then
+            echo "No output file produced — agent likely crashed before emitting a result."
+            exit 0
+          fi
+
+          status=$(jq -r '.status' "$OUTPUT_FILE")
+          {
+            echo "## Architecture review"
+            echo ""
+            if [ "$status" = "proposed" ]; then
+              issue_url="${{ steps.publish.outputs.issue_url }}"
+              title=$(jq -r '.title' "$OUTPUT_FILE")
+              summary=$(jq -r '.oneLineSummary' "$OUTPUT_FILE")
+              echo "**Created:** [$title]($issue_url)"
+              echo ""
+              echo "$summary"
+              echo ""
+              echo "### Candidates considered"
+              jq -r '.candidatesConsidered[] | "- \(.)"' "$OUTPUT_FILE"
+            elif [ "$status" = "skipped" ]; then
+              reason=$(jq -r '.reason' "$OUTPUT_FILE")
+              echo "**Skipped — no fresh candidates today.**"
+              echo ""
+              echo "$reason"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
