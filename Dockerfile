@@ -1,9 +1,11 @@
 FROM python:3.12-slim
 
-# Pinned to the versions verified in production (2026-06). Bump deliberately —
-# an unpinned install lets a rebuild silently pull a behavior-changing LiteLLM
-# (e.g. a release that changes DB-less auth handling).
-RUN pip install --no-cache-dir uv && \
+# Pin the install toolchain + Python deps to the versions verified in production
+# (2026-06) so a rebuild can't silently pull a behavior-changing LiteLLM. The base
+# image stays a tag (python:3.12-slim) on purpose — it tracks Debian security
+# patches; for a fully frozen artifact, deploy the prebuilt ECR image (see
+# docs/hosted_deployment.md) instead of rebuilding on the box.
+RUN pip install --no-cache-dir "uv==0.11.21" && \
     uv pip install --system "litellm[proxy]==1.89.1" "prisma==0.15.0"
 
 WORKDIR /app
