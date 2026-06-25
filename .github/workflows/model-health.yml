@@ -32,7 +32,7 @@ jobs:
           BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
           AUTH_TOKEN: ${{ secrets.LITELLM_MASTER_KEY }}
         run: |
-          set -uo pipefail
+          set -euo pipefail
           base="${BASE_URL%/}"
           if [ -z "$base" ] || [ -z "${AUTH_TOKEN:-}" ]; then
             echo "::error::LITELLM_BASE_URL / LITELLM_MASTER_KEY are not set on this repo"

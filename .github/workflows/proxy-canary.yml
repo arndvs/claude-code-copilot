@@ -22,7 +22,7 @@ jobs:
           BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
           AUTH_TOKEN: ${{ secrets.LITELLM_MASTER_KEY }}
         run: |
-          set -uo pipefail
+          set -euo pipefail
           fail() {
             { echo "status=fail"; echo "detail=$1"; } >> "$GITHUB_OUTPUT"
             echo "❌ $1"
@@ -48,6 +48,7 @@ jobs:
           attempts=5
           got=no
           hard=""
+          empty_seen=no
           for i in $(seq 1 "$attempts"); do
             code=$(curl -s -o /tmp/msg.json -w '%{http_code}' --max-time 60 -X POST "$base/v1/messages" \
               -H "Authorization: Bearer $AUTH_TOKEN" \
@@ -65,6 +66,7 @@ jobs:
                 fi
                 has=$(python3 -c "import json; d=json.load(open('/tmp/msg.json')); print('yes' if d.get('content') else 'no')" 2>/dev/null || echo no)
                 if [ "$has" = "yes" ]; then got=yes; echo "completion attempt $i/$attempts: 200 with content ✓"; break; fi
+                empty_seen=yes
                 echo "completion attempt $i/$attempts: 200 but empty content — retrying" ;;
               401|403) hard="auth error HTTP $code${etype:+ (type=$etype)} — master key likely wrong/mismatched"; break ;;
               400)     hard="HTTP 400${etype:+ (type=$etype)} — e.g. no_db_connection / bad request"; break ;;
@@ -79,10 +81,14 @@ jobs:
           if [ "$got" = "yes" ]; then
             echo "status=ok" >> "$GITHUB_OUTPUT"
             echo "✅ proxy canary passed (readiness + completion)"
-          else
+          elif [ "$empty_seen" = "yes" ]; then
+            # Proxy is up + authenticating but upstream returned empty content — transient Copilot quirk.
             echo "::warning::Proxy is up and authenticating, but upstream returned empty completions across $attempts retries (transient Copilot 'no choices'). Not paging."
             echo "status=degraded" >> "$GITHUB_OUTPUT"
             echo "⚠️ degraded: empty completions, but proxy + auth healthy"
+          else
+            # Never saw a 200 at all — persistent non-200/non-hard codes (e.g. 429, 404). Hard fail.
+            fail "persistent non-200/non-hard responses across $attempts retries — proxy not serving completions"
           fi
 
       - name: Open or update the canary issue on failure
