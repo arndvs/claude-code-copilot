@@ -208,6 +208,28 @@ Expected: (A) a completion, (B) `401`, (C) a timeout/`000`.
 
 **Reboot-survival test:** reboot the instance, wait a few minutes, and re-run check (A) from your external machine. If it returns a completion with no manual intervention, the auto-restart chain (Docker → both containers → persisted cert → persisted token) is sound.
 
+### Confirm deployed version
+
+After a redeploy, confirm which code is running without SSH/SSM access:
+
+```bash
+# D) check deployed version — no auth required
+curl -s https://proxy.example.com/health/version
+```
+
+Expected output:
+
+```json
+{"sha": "abc1234", "built_at": "2024-06-01T12:00:00Z"}
+```
+
+- `sha` — the 7-character git commit baked in at `docker build` time (via `--build-arg GIT_SHA`).
+- `built_at` — ISO 8601 UTC timestamp of the build (via `--build-arg BUILD_TIMESTAMP`).
+
+> **This replaces the need to SSH/SSM into the instance and run `git log` to check
+> which version is deployed.** After any redeploy (§8), hit `/health/version` from
+> your workstation to confirm the new SHA matches the commit you pushed.
+
 ---
 
 ## 8. Operations
