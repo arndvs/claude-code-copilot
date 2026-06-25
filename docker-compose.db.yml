@@ -1,0 +1,37 @@
+# Optional spend-tracking database overlay.
+#
+# The base docker-compose.yml runs DB-LESS — the proxy needs no database for
+# master-key auth + static model routing. This overlay adds a Postgres container
+# and points LiteLLM at it (spend tracking, virtual keys, model-in-db).
+#
+# Enable it explicitly:
+#   docker compose -f docker-compose.yml -f docker-compose.db.yml up --build
+#
+# WARNING: never set DATABASE_URL without also starting this db service —
+# LiteLLM would enter DB mode with no reachable database and return
+# 400 "No connected db" on every request.
+services:
+  proxy:
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-litellm}:${POSTGRES_PASSWORD:-litellm}@db:5432/${POSTGRES_DB:-litellm}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # Postgres — override credentials in .env for production.
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-litellm}
+      POSTGRES_USER: ${POSTGRES_USER:-litellm}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-litellm}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:

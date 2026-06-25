@@ -151,7 +151,7 @@ Notes:
 - `-p 127.0.0.1:4000:4000` binds to **localhost only** — the proxy is never directly internet-reachable. Verify with `ss -tlnp | grep 4000` (expect `127.0.0.1:4000`, not `0.0.0.0:4000`).
 - `--restart unless-stopped` brings the container back automatically after a reboot or crash.
 - **Changing env vars (e.g. rotating the key) requires** `docker rm -f` **+ a fresh** `docker run`**, not** `docker restart` — a restart reuses the original environment and will keep serving the old key. See §7.
-- This single-container run intentionally omits the database. The Compose stack adds Postgres for spend tracking; if you use it, the proxy image must include the `prisma` package (this repo's Dockerfile installs it) or LiteLLM fails to initialize the DB layer.
+- This single-container run is **DB-less**, and so is the default `docker compose up` — the proxy needs no database for master-key auth and static model routing. To enable the optional spend-tracking Postgres, layer the overlay: `docker compose -f docker-compose.yml -f docker-compose.db.yml up`. Never set `DATABASE_URL` without starting that `db` service, or LiteLLM enters DB mode with no reachable database and returns `400 "No connected db"` on every request. (The image already includes `prisma` for the DB-mode path.)
 
 ---
 
@@ -228,7 +228,13 @@ docker run -d --name proxy --restart unless-stopped \
 
 Then update Parameter Store (from CloudShell) with the new value and update any clients' `ANTHROPIC_AUTH_TOKEN`.
 
-### Redeploy after a repo update
+This box has two deploy models. **Build-on-box** (below) pulls the repo and
+rebuilds the image on the instance — simplest, and reproducible now that the
+`Dockerfile` pins its dependencies. **Immutable ECR image** (further below) is
+recommended for production: build once, push to ECR, then pull a frozen image —
+no on-box build, no dependency drift, instant rollback.
+
+### Redeploy after a repo update (build on the box)
 
 ```bash
 cd /opt/claude-code-copilot
@@ -245,27 +251,92 @@ docker run -d --name proxy --restart unless-stopped \
 
 The `.env` and the OAuth token are outside git and are untouched by a redeploy.
 
-### Back up the image to ECR
+### Deploy via ECR (immutable image — recommended for production)
 
-A pushed image is a frozen, exact copy — no rebuild (and no dependency-version drift) needed to restore on a new host.
+The build-on-box redeploy rebuilds the image on the instance, re-resolving
+dependencies each time. The pinned `Dockerfile` makes that reproducible, but the
+most robust path is to build the image **once** (on a build host or in CI), push
+it to ECR, and have the box **pull a frozen image** — no on-box build, no
+dependency resolution, and instant rollback. The image bakes in
+`litellm_config.yaml`, so an ECR-deployed box needs only `.env` and the OAuth
+token mount — not a git checkout.
+
+**1. One-time — create the registry:**
 
 ```bash
-# one-time: create the repo (CloudShell)
+# CloudShell (write access)
 aws ecr create-repository --repository-name claude-code-copilot-proxy --region <region>
-
-# on the box
-ACCOUNT=<account>; REGION=<region>; REPO=claude-code-copilot-proxy
-ECR_URI=$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/$REPO
-aws ecr get-login-password --region $REGION | \
-  docker login --username AWS --password-stdin $ACCOUNT.dkr.ecr.$REGION.amazonaws.com
-docker tag claude-code-copilot-proxy:latest $ECR_URI:latest
-docker push $ECR_URI:latest
-
 ```
 
-The instance role needs `ecr:GetAuthorizationToken` (resource `*`) plus, scoped to the repo ARN: `ecr:BatchCheckLayerAvailability`, `ecr:BatchGetImage`, `ecr:GetDownloadUrlForLayer`, `ecr:PutImage`, `ecr:InitiateLayerUpload`, `ecr:UploadLayerPart`, `ecr:CompleteLayerUpload`. (`BatchGetImage` is required — the push performs a manifest existence check that fails with `403 Forbidden` without it.)
+Grant the **instance role** pull access — `ecr:GetAuthorizationToken` (resource
+`*`) plus, scoped to the repo ARN: `ecr:BatchCheckLayerAvailability`,
+`ecr:BatchGetImage`, `ecr:GetDownloadUrlForLayer`. A **build host / CI** that
+pushes additionally needs `ecr:PutImage`, `ecr:InitiateLayerUpload`,
+`ecr:UploadLayerPart`, `ecr:CompleteLayerUpload`. (`BatchGetImage` is required —
+the push performs a manifest existence check that fails with `403 Forbidden`
+without it.)
 
-To restore on any host: `docker login` to ECR as above, then `docker pull $ECR_URI:latest`.
+**2. Build and push (build host or CI):**
+
+```bash
+ACCOUNT=<account>; REGION=<region>; REPO=claude-code-copilot-proxy
+ECR_URI=$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/$REPO
+SHA=$(git rev-parse --short HEAD)
+
+aws ecr get-login-password --region $REGION | \
+  docker login --username AWS --password-stdin $ACCOUNT.dkr.ecr.$REGION.amazonaws.com
+
+docker build -t claude-code-copilot-proxy:$SHA .
+# Tag with the commit SHA (immutable — enables rollback) AND a moving latest:
+docker tag claude-code-copilot-proxy:$SHA $ECR_URI:$SHA
+docker tag claude-code-copilot-proxy:$SHA $ECR_URI:latest
+docker push $ECR_URI:$SHA
+docker push $ECR_URI:latest
+```
+
+**3. Deploy on the box (pull, don't build):**
+
+```bash
+ACCOUNT=<account>; REGION=<region>; REPO=claude-code-copilot-proxy
+ECR_URI=$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/$REPO
+TAG=<commit-sha>            # pin to an exact build; avoid 'latest' in prod
+
+aws ecr get-login-password --region $REGION | \
+  docker login --username AWS --password-stdin $ACCOUNT.dkr.ecr.$REGION.amazonaws.com
+docker pull $ECR_URI:$TAG
+
+# Recreate the container against the pulled image (env + token are box-local):
+docker rm -f proxy
+docker run -d --name proxy --restart unless-stopped \
+  --env-file .env \
+  -v "$HOME/.config/litellm/github_copilot:/root/.config/litellm/github_copilot:rw" \
+  -p "127.0.0.1:4000:4000" \
+  $ECR_URI:$TAG
+```
+
+**4. Roll back** — pull a previous SHA tag and recreate:
+
+```bash
+docker pull $ECR_URI:<previous-sha>
+docker rm -f proxy
+docker run -d --name proxy --restart unless-stopped \
+  --env-file .env \
+  -v "$HOME/.config/litellm/github_copilot:/root/.config/litellm/github_copilot:rw" \
+  -p "127.0.0.1:4000:4000" \
+  $ECR_URI:<previous-sha>
+```
+
+**5. Verify** after any deploy:
+
+```bash
+curl -s http://localhost:4000/health/readiness          # expect 200
+# then run check (A) from §7 with a valid key, from an external machine
+```
+
+> The `.env` and the OAuth token live outside git and the image, and survive
+> every deploy. Because the image is immutable and self-contained, rolling
+> forward or back is just a `docker pull` + recreate — the proxy is never
+> rebuilt on the box.
 
 ### Grow the disk (no downtime)
 

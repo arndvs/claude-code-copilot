@@ -1,7 +1,10 @@
 FROM python:3.12-slim
 
+# Pinned to the versions verified in production (2026-06). Bump deliberately —
+# an unpinned install lets a rebuild silently pull a behavior-changing LiteLLM
+# (e.g. a release that changes DB-less auth handling).
 RUN pip install --no-cache-dir uv && \
-    uv pip install --system "litellm[proxy]" prisma
+    uv pip install --system "litellm[proxy]==1.89.1" "prisma==0.15.0"
 
 WORKDIR /app
 
