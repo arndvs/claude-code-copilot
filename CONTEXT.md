@@ -60,6 +60,8 @@ docker compose -f docker-compose.yml -f docker-compose.db.yml up --build
 | `content_len` | Text content length (0 = empty, −1 = non-string) |
 | `completion_tokens` | Token count from usage |
 | `upstream_empty` | `true` when status=success and (content_len=0 or completion_tokens=0) |
+| `http_status` | HTTP status code from upstream (int or null) |
+| `ratelimit` | Dict of `x-ratelimit-*` headers (prefix-stripped); **omitted** when none present |
 | `status` | `success` or `failure` |
 
 **Design rules:**
