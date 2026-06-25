@@ -7,7 +7,8 @@ litellm_settings:
   # each completion's upstream finish_reason / content length (metadata only, no
   # message content). See litellm_logger.py.
   json_logs: true
-  callbacks: litellm_logger.proxy_handler_instance
+  callbacks:
+    - litellm_logger.proxy_handler_instance
 
 model_list:
   # Claude Code sends hyphenated names; Copilot uses dotted names.
