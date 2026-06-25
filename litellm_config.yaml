@@ -9,6 +9,7 @@ litellm_settings:
   json_logs: true
   callbacks:
     - litellm_logger.proxy_handler_instance
+    - health_version.version_callback_instance
 
 model_list:
   # Claude Code sends hyphenated names; Copilot uses dotted names.

@@ -198,9 +198,13 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST https://proxy.example.com/v1/me
 # C) raw proxy port from outside → connection refused / timeout (never exposed)
 curl -s -o /dev/null -w "%{http_code}\n" --max-time 8 http://proxy.example.com:4000/v1/messages
 
+# D) version endpoint — confirm which commit is running (no auth required)
+curl -s https://proxy.example.com/health/version
+# expect {"sha":"<7-char>","built_at":"<ISO 8601 timestamp>"}
+
 ```
 
-Expected: (A) a completion, (B) `401`, (C) a timeout/`000`.
+Expected: (A) a completion, (B) `401`, (C) a timeout/`000`, (D) JSON with `sha` and `built_at`.
 
 **Reboot-survival test:** reboot the instance, wait a few minutes, and re-run check (A) from your external machine. If it returns a completion with no manual intervention, the auto-restart chain (Docker → both containers → persisted cert → persisted token) is sound.
 
@@ -240,7 +244,10 @@ build, no dependency drift, instant rollback.
 ```bash
 cd /opt/claude-code-copilot
 git fetch origin && git reset --hard origin/main   # or your deploy branch
-docker build -t claude-code-copilot-proxy:latest .
+docker build \
+  --build-arg BUILD_SHA="$(git rev-parse --short HEAD)" \
+  --build-arg BUILD_TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  -t claude-code-copilot-proxy:latest .
 docker rm -f proxy 2>/dev/null || true
 docker run -d --name proxy --restart unless-stopped \
   --env-file .env \
@@ -287,7 +294,10 @@ SHA=$(git rev-parse --short HEAD)
 aws ecr get-login-password --region $REGION | \
   docker login --username AWS --password-stdin $ACCOUNT.dkr.ecr.$REGION.amazonaws.com
 
-docker build -t claude-code-copilot-proxy:$SHA .
+docker build \
+  --build-arg BUILD_SHA="$SHA" \
+  --build-arg BUILD_TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  -t claude-code-copilot-proxy:$SHA .
 # Tag with the commit SHA (immutable — enables rollback) AND a moving latest:
 docker tag claude-code-copilot-proxy:$SHA $ECR_URI:$SHA
 docker tag claude-code-copilot-proxy:$SHA $ECR_URI:latest
@@ -331,6 +341,7 @@ docker run -d --name proxy --restart unless-stopped \
 
 ```bash
 curl -s http://localhost:4000/health/readiness          # expect 200
+curl -s http://localhost:4000/health/version            # expect {"sha":"<7-char>","built_at":"<ISO>"}
 # then run check (A) from §7 with a valid key, from an external machine
 ```
 
