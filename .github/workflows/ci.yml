@@ -18,6 +18,13 @@ jobs:
       - name: Security regression tests
         run: bash scripts/test_security.sh
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install PyYAML
+        run: pip install pyyaml
+
       - name: Validate litellm_config.yaml parses
         run: |
           python3 -c "import yaml; yaml.safe_load(open('litellm_config.yaml')); print('litellm_config.yaml OK')"
