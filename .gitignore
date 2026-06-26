@@ -30,5 +30,5 @@ litellm.db
 QA-REPORT.md
 
 # Reference repos (third-party, not distributed)
-/working/.sandcastle/engine/node_modules/
+.sandcastle/engine/node_modules/
 .sandcastle/engine/package-lock.json
