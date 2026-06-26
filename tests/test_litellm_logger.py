@@ -750,6 +750,7 @@ class TestProxyObservabilityLogger(unittest.TestCase):
             sys.stdout = old_stdout
 
         line = buf.getvalue().strip()
+        self.assertTrue(line.startswith("PROXY_LOG "), f"Expected PROXY_LOG prefix, got: {line!r}")
         rec = json.loads(line[len("PROXY_LOG "):])
         self.assertEqual(rec["status"], "success")
 
@@ -769,6 +770,7 @@ class TestProxyObservabilityLogger(unittest.TestCase):
             sys.stdout = old_stdout
 
         line = buf.getvalue().strip()
+        self.assertTrue(line.startswith("PROXY_LOG "), f"Expected PROXY_LOG prefix, got: {line!r}")
         rec = json.loads(line[len("PROXY_LOG "):])
         self.assertEqual(rec["status"], "failure")
 
