@@ -59,7 +59,6 @@ start:
 	PORT=$${LITELLM_PORT:-$(PORT)} && \
 	echo "Starting LiteLLM → GitHub Copilot proxy on port $$PORT..." && \
 	UV_NATIVE_TLS=$${UV_NATIVE_TLS:-true} \
-	LITELLM_WORKER_STARTUP_HOOKS=$${LITELLM_WORKER_STARTUP_HOOKS:-version_endpoint:mount_version_endpoint} \
 	uv run \
 		--with "litellm[proxy]" \
 		litellm --config litellm_config.yaml --port $$PORT
