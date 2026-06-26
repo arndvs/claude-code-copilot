@@ -1,4 +1,4 @@
-.PHONY: help setup start stop test claude-enable claude-disable claude-status list-models list-models-enabled install-claude
+.PHONY: help setup start stop test test-stream claude-enable claude-disable claude-status list-models list-models-enabled install-claude
 
 PORT ?= 4000
 
@@ -9,7 +9,8 @@ help:
 	@echo "  make setup               Set up .env with generated keys"
 	@echo "  make start               Start LiteLLM proxy (OAuth on first run)"
 	@echo "  make stop                Stop the proxy"
-	@echo "  make test                Test proxy is working"
+	@echo "  make test                Test proxy is working (non-streaming)"
+	@echo "  make test-stream         Test proxy streaming (SSE) response"
 	@echo ""
 	@echo "  make claude-enable       Point Claude Code at local proxy"
 	@echo "  make claude-disable      Restore Claude Code to Anthropic direct"
@@ -84,6 +85,30 @@ test:
 		-d '{"model":"claude-sonnet-4-6","max_tokens":50,"messages":[{"role":"user","content":"Say hello in one word."}]}' \
 	| python3 -m json.tool && echo "" && echo "✅ Proxy is working!" \
 	|| { echo "❌ Test failed. Is the proxy running? ('make start')"; exit 1; }
+
+test-stream:
+	@if [ ! -f .env ]; then echo "❌ .env not found. Run 'make setup' first."; exit 1; fi
+	@set -a && . ./.env && set +a && \
+	PORT=$${LITELLM_PORT:-$(PORT)} && \
+	MASTER_KEY=$$LITELLM_MASTER_KEY && \
+	echo "Testing streaming (SSE) at http://localhost:$$PORT..." && \
+	RESPONSE=$$(curl -sf -X POST http://localhost:$$PORT/v1/messages \
+		-H "Content-Type: application/json" \
+		-H "Authorization: Bearer $$MASTER_KEY" \
+		-H "Accept: text/event-stream" \
+		-d '{"model":"claude-sonnet-4-6","max_tokens":50,"stream":true,"messages":[{"role":"user","content":"Say hi."}]}') && \
+	echo "$$RESPONSE" | head -20 && \
+	if echo "$$RESPONSE" | grep -q 'data:'; then \
+		echo "" && echo "✅ Streaming response contains SSE data lines!"; \
+		if echo "$$RESPONSE" | grep -q '"upstream_empty":true'; then \
+			echo "⚠️  upstream_empty:true detected in streaming response (document if expected)"; \
+		else \
+			echo "✅ No upstream_empty:true — streaming is delivering content"; \
+		fi; \
+	else \
+		echo "❌ No SSE data: lines found. Is streaming enabled?"; exit 1; \
+	fi \
+	|| { echo "❌ Stream test failed. Is the proxy running? ('make start')"; exit 1; }
 
 # ── Claude Code configuration ──────────────────────────────────
 
