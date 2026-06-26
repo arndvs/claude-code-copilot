@@ -65,6 +65,27 @@ class TestGetVersion:
         result = get_version()
         assert set(result.keys()) == {"sha", "built_at"}
 
+    def test_git_fallback_sha_truncated_to_7_chars(self, monkeypatch):
+        """git rev-parse --short can return >7 chars in large repos; must be trimmed."""
+        monkeypatch.delenv("BUILD_SHA", raising=False)
+        from health_version import get_version
+
+        with patch("health_version.subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 0
+            mock_run.return_value.stdout = "abcdef1234567890\n"  # 16-char abbrev
+            result = get_version()
+
+        assert result["sha"] == "abcdef1", f"Expected 7-char SHA, got {result['sha']!r}"
+
+    def test_built_at_unknown_when_env_is_empty_string(self, monkeypatch):
+        """BUILD_TIMESTAMP='' (empty) normalizes to 'unknown', not an empty string."""
+        monkeypatch.setenv("BUILD_SHA", "abc1234")
+        monkeypatch.setenv("BUILD_TIMESTAMP", "")
+        from health_version import get_version
+
+        result = get_version()
+        assert result["built_at"] == "unknown"
+
 
 class TestCustomApiRouter:
     """Verify the module exports a custom_api_router compatible with LiteLLM."""
@@ -234,35 +255,42 @@ class TestSingleRouteRegistration:
         assert "GET" in route.methods
 
     def test_exactly_one_health_version_route_on_simulated_app(self):
-        """Include custom_api_router on a real FastAPI app and assert no competing
-        direct-registration collision exists, and the endpoint responds correctly.
+        """Include custom_api_router on a real FastAPI app and assert exactly one
+        GET /health/version route exists, using a recursive route collector that
+        handles both eager-flattening (older FastAPI) and lazy _IncludedRouter
+        (FastAPI 0.100+) registration styles.
 
-        Routes registered via include_router appear as lazy _IncludedRouter objects
-        in app.routes (not as APIRoute). Routes registered directly via @app.get()
-        or app.add_api_route() appear as APIRoute objects in app.routes. Asserting
-        zero direct APIRoute entries for /health/version catches the collision case
-        where a second module uses @app.get("/health/version") without relying on the
-        private _IncludedRouter type name.
+        A second module registering GET /health/version via either @app.get() or
+        a second include_router() would cause the count to exceed 1 and fail.
         """
         from fastapi import FastAPI
         from fastapi.routing import APIRoute
         from fastapi.testclient import TestClient
         import health_version
 
+        def _collect_get_routes(routes, path: str) -> list:
+            """Recursively collect all GET APIRoute objects for a given path.
+
+            Handles both direct APIRoute registrations and lazy _IncludedRouter
+            objects (FastAPI 0.100+), which nest their routes under original_router.
+            """
+            found = []
+            for r in routes:
+                if isinstance(r, APIRoute) and r.path == path and "GET" in (r.methods or set()):
+                    found.append(r)
+                # _IncludedRouter (FastAPI 0.100+) stores the original router;
+                # recurse to find APIRoute objects nested inside it.
+                if hasattr(r, "original_router") and hasattr(r.original_router, "routes"):
+                    found.extend(_collect_get_routes(r.original_router.routes, path))
+            return found
+
         app = FastAPI()
         app.include_router(health_version.custom_api_router)
 
-        # No direct APIRoute for /health/version should exist; all registration
-        # must flow through custom_api_router (which uses include_router).
-        # A second module calling @app.get("/health/version") would create an
-        # APIRoute entry here and fail this assertion.
-        direct_hv_routes = [
-            r for r in app.routes
-            if isinstance(r, APIRoute) and r.path == "/health/version"
-        ]
-        assert len(direct_hv_routes) == 0, (
-            f"Found {len(direct_hv_routes)} direct APIRoute registration(s) for "
-            f"/health/version — all registration must flow through custom_api_router"
+        hv_routes = _collect_get_routes(app.routes, "/health/version")
+        assert len(hv_routes) == 1, (
+            f"Expected exactly 1 GET /health/version route, found {len(hv_routes)} — "
+            f"a second module may have registered the route"
         )
 
         # Functional check: the route is reachable and returns the correct schema.

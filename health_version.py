@@ -64,12 +64,16 @@ def get_version() -> dict:
     # Fall back to live git when env is missing or is the Dockerfile default.
     if not sha or sha == "unknown":
         sha = _git_sha_fallback()
-    # Spec requires a 7-char short SHA; trim if a full SHA was baked in.
-    elif len(sha) > 7:
+    # Spec requires a 7-char short SHA; trim uniformly (env var or git fallback).
+    # git rev-parse --short can return more than 7 chars in large repos.
+    if sha != "unknown" and len(sha) > 7:
         sha = sha[:7]
+    built_at = os.environ.get("BUILD_TIMESTAMP", "").strip()
+    if not built_at or built_at == "unknown":
+        built_at = "unknown"
     return {
         "sha": sha,
-        "built_at": os.environ.get("BUILD_TIMESTAMP", "unknown"),
+        "built_at": built_at,
     }
 
 
