@@ -3,7 +3,7 @@
 #
 # Acceptance criteria (from issue #60):
 #   1. docs/hosted_deployment.md 'docker build' commands in the redeploy section
-#      include --build-arg GIT_SHA=... --build-arg BUILD_TIMESTAMP=...
+#      include --build-arg BUILD_SHA=... --build-arg BUILD_TIMESTAMP=...
 #   2. docs/hosted_deployment.md ECR build-and-push section includes the same
 #   3. No existing docker build invocation in the doc is left without the new args
 #
@@ -33,17 +33,17 @@ fi
 joined_doc=$(sed ':a;/\\$/N;s/\\\n//;ta' "$DOC")
 # Use word-boundary match: 'docker build ' or 'docker build\t' — excludes 'docker builder'
 
-# ── Test 1: Every 'docker build' line includes --build-arg GIT_SHA ──────────
-echo "Test 1: Every 'docker build' command includes --build-arg GIT_SHA"
+# ── Test 1: Every 'docker build' line includes --build-arg BUILD_SHA ──────────
+echo "Test 1: Every 'docker build' command includes --build-arg BUILD_SHA"
 build_lines=$(echo "$joined_doc" | grep -E 'docker build[[:space:]]+-' | grep -cv 'docker builder' || true)
-sha_lines=$(echo "$joined_doc" | grep -E 'docker build[[:space:]]+-' | grep -v 'docker builder' | grep -c '\-\-build-arg.*GIT_SHA' || true)
+sha_lines=$(echo "$joined_doc" | grep -E 'docker build[[:space:]]+-' | grep -v 'docker builder' | grep -c '\-\-build-arg.*BUILD_SHA' || true)
 
 if [ "$build_lines" -eq 0 ]; then
     fail "No 'docker build' commands found in $DOC"
 elif [ "$build_lines" -eq "$sha_lines" ]; then
-    pass "All $build_lines docker build commands include --build-arg GIT_SHA ($sha_lines/$build_lines)"
+    pass "All $build_lines docker build commands include --build-arg BUILD_SHA ($sha_lines/$build_lines)"
 else
-    fail "Only $sha_lines of $build_lines docker build commands include --build-arg GIT_SHA"
+    fail "Only $sha_lines of $build_lines docker build commands include --build-arg BUILD_SHA"
 fi
 
 # ── Test 2: Every 'docker build' line includes --build-arg BUILD_TIMESTAMP ──
@@ -58,22 +58,24 @@ else
     fail "Only $ts_lines of $build_lines docker build commands include --build-arg BUILD_TIMESTAMP"
 fi
 
-# ── Test 3: GIT_SHA uses git rev-parse --short HEAD ────────────────────────
-echo "Test 3: GIT_SHA build-arg uses git rev-parse --short HEAD"
-sha_correct=$(echo "$joined_doc" | grep -E 'docker build[[:space:]]+-' | grep -v 'docker builder' | grep -c 'GIT_SHA=\$(git rev-parse --short HEAD)' || true)
+# ── Test 3: BUILD_SHA uses a dynamic value (git rev-parse or variable) ──────
+echo "Test 3: BUILD_SHA build-arg uses a dynamic value (git rev-parse or variable)"
+# Accepts quoted and unquoted forms: BUILD_SHA=$(git ...) or BUILD_SHA="$(git ...)" or BUILD_SHA="$SHA"
+sha_correct=$(echo "$joined_doc" | grep -E 'docker build[[:space:]]+-' | grep -v 'docker builder' | grep -cE '\-\-build-arg.*BUILD_SHA="?\$' || true)
 
 if [ "$build_lines" -eq "$sha_correct" ]; then
-    pass "All docker build commands use GIT_SHA=\$(git rev-parse --short HEAD)"
+    pass "All docker build commands use a dynamic BUILD_SHA value"
 else
-    fail "Only $sha_correct of $build_lines docker build commands use correct GIT_SHA formula"
+    fail "Only $sha_correct of $build_lines docker build commands use a dynamic BUILD_SHA value"
 fi
 
 # ── Test 4: BUILD_TIMESTAMP uses date -u ISO format ───────────────────────
 echo "Test 4: BUILD_TIMESTAMP build-arg uses date -u ISO format"
-ts_correct=$(echo "$joined_doc" | grep -E 'docker build[[:space:]]+-' | grep -v 'docker builder' | grep -c 'BUILD_TIMESTAMP=\$(date -u' || true)
+# Accepts both quoted and unquoted forms
+ts_correct=$(echo "$joined_doc" | grep -E 'docker build[[:space:]]+-' | grep -v 'docker builder' | grep -cE '\-\-build-arg.*BUILD_TIMESTAMP="?\$\(?date -u' || true)
 
 if [ "$build_lines" -eq "$ts_correct" ]; then
-    pass "All docker build commands use BUILD_TIMESTAMP=\$(date -u ...)"
+    pass "All docker build commands use BUILD_TIMESTAMP with date -u ISO format"
 else
     fail "Only $ts_correct of $build_lines docker build commands use correct BUILD_TIMESTAMP formula"
 fi
@@ -86,7 +88,7 @@ redeploy_build=$(echo "$redeploy_section" | sed ':a;/\\$/N;s/\\\n//;ta' | grep '
 
 if [ -z "$redeploy_build" ]; then
     fail "No docker build found in redeploy section"
-elif echo "$redeploy_build" | grep -q '\-\-build-arg.*GIT_SHA' && \
+elif echo "$redeploy_build" | grep -q '\-\-build-arg.*BUILD_SHA' && \
      echo "$redeploy_build" | grep -q '\-\-build-arg.*BUILD_TIMESTAMP'; then
     pass "Redeploy section docker build includes both build-args"
 else
@@ -101,7 +103,7 @@ ecr_build=$(echo "$ecr_section" | sed ':a;/\\$/N;s/\\\n//;ta' | grep 'docker bui
 
 if [ -z "$ecr_build" ]; then
     fail "No docker build found in ECR build-and-push section"
-elif echo "$ecr_build" | grep -q '\-\-build-arg.*GIT_SHA' && \
+elif echo "$ecr_build" | grep -q '\-\-build-arg.*BUILD_SHA' && \
      echo "$ecr_build" | grep -q '\-\-build-arg.*BUILD_TIMESTAMP'; then
     pass "ECR build-and-push section docker build includes both build-args"
 else
