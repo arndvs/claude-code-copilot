@@ -7,6 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # Load .env if present
 if [[ -f "$SCRIPT_DIR/.env" ]]; then
   set -a
+  # shellcheck disable=SC1091  # .env is user-supplied at runtime; not available at lint time
   source "$SCRIPT_DIR/.env"
   set +a
 fi
