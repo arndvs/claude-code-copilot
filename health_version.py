@@ -34,8 +34,12 @@ custom_api_router = APIRouter()
 
 def get_version() -> dict:
     """Return version info from build-time environment variables."""
+    sha = os.environ.get("BUILD_SHA", "unknown")
+    # Spec requires a 7-char short SHA; trim if a full SHA was baked in.
+    if sha != "unknown" and len(sha) > 7:
+        sha = sha[:7]
     return {
-        "sha": os.environ.get("BUILD_SHA", "unknown"),
+        "sha": sha,
         "built_at": os.environ.get("BUILD_TIMESTAMP", "unknown"),
     }
 
@@ -46,16 +50,24 @@ async def health_version():
     return get_version()
 
 
+_router_registered = False
+
+
 def _register_router():
     """Attach custom_api_router to the LiteLLM proxy app, if available.
 
-    Called at module import time. Fails silently when imported outside the
-    proxy context (e.g. during tests or standalone use).
+    Called at module import time. Idempotent — safe to call multiple times
+    (e.g. during tests that import the module more than once).
+    Fails silently when imported outside the proxy context.
     """
+    global _router_registered
+    if _router_registered:
+        return
     try:
         from litellm.proxy.proxy_server import app  # noqa: WPS433
 
         app.include_router(custom_api_router)
+        _router_registered = True
     except Exception:
         pass
 
