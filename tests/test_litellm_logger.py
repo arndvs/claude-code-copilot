@@ -6,8 +6,10 @@ implemented; _emit integration tests should fail until the wiring is in place.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
+from datetime import datetime
 from io import StringIO
 from types import SimpleNamespace
 
