@@ -1,7 +1,4 @@
-"""Tests for health_version — /health/version endpoint logic.
-
-RED phase: tests fail until health_version module is implemented.
-"""
+"""Tests for health_version — /health/version endpoint logic."""
 
 from __future__ import annotations
 
