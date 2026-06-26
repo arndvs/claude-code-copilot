@@ -12,16 +12,15 @@ WORKDIR /app
 
 COPY litellm_config.yaml .
 COPY litellm_logger.py .
-COPY version_endpoint.py .
+COPY health_version.py .
 
 EXPOSE 4000
 
-# Version metadata baked at build time (consumed by /health/version endpoint).
-# Defaults to "unknown" so builds without --build-arg don't break.
-ARG GIT_SHA=unknown
+# Build-time version info baked into the image (set during docker build).
+ARG BUILD_SHA=unknown
 ARG BUILD_TIMESTAMP=unknown
-ENV GIT_SHA=$GIT_SHA
-ENV BUILD_TIMESTAMP=$BUILD_TIMESTAMP
+ENV BUILD_SHA=${BUILD_SHA}
+ENV BUILD_TIMESTAMP=${BUILD_TIMESTAMP}
 
 # /app on the import path so litellm can load the litellm_logger callback module.
 ENV PYTHONPATH=/app
