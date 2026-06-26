@@ -6,15 +6,16 @@ implemented; _emit integration tests should fail until the wiring is in place.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
+from datetime import datetime
 from io import StringIO
-from types import SimpleNamespace
 
 import pytest
 
 sys.path.insert(0, ".")
-from litellm_logger import _extract_http_info, _emit
+from litellm_logger import _extract_http_info, _emit, ProxyObservabilityLogger
 
 
 # ---------------------------------------------------------------------------
@@ -263,3 +264,117 @@ class TestEmitHttpInfo:
         rec = _capture_emit(kwargs, response_obj=response_obj)
         raw_line = json.dumps(rec)
         assert "SECRET_CONTENT_SHOULD_NOT_APPEAR" not in raw_line
+
+
+# ===================================================================
+# _emit integration — stream field in PROXY_LOG
+# ===================================================================
+
+
+class TestEmitStreamField:
+    """Verify _emit includes stream indicator from kwargs."""
+
+    def test_emit_stream_true_when_stream_in_kwargs(self):
+        """When kwargs['stream'] is True, log should record stream=True."""
+        kwargs = {
+            "model": "test-model",
+            "call_type": "completion",
+            "stream": True,
+            "original_response": FakeHttpxResponse(200),
+        }
+        rec = _capture_emit(kwargs)
+        assert rec["stream"] is True
+
+    def test_emit_stream_false_when_stream_false_in_kwargs(self):
+        """When kwargs['stream'] is False, log should record stream=False."""
+        kwargs = {
+            "model": "test-model",
+            "call_type": "completion",
+            "stream": False,
+            "original_response": FakeHttpxResponse(200),
+        }
+        rec = _capture_emit(kwargs)
+        assert rec["stream"] is False
+
+    def test_emit_stream_none_when_missing(self):
+        """When kwargs has no 'stream' key, log should record stream=None."""
+        kwargs = {
+            "model": "test-model",
+            "call_type": "completion",
+            "original_response": FakeHttpxResponse(200),
+        }
+        rec = _capture_emit(kwargs)
+        assert rec["stream"] is None
+
+
+# ===================================================================
+# ProxyObservabilityLogger — streaming callback methods
+# ===================================================================
+
+
+class TestStreamingCallbacks:
+    """Verify logger handles streaming success/failure callbacks."""
+
+    def _capture_logger_call(self, method_name, kwargs, response_obj=None):
+        """Call a logger method and capture the PROXY_LOG line."""
+        from datetime import datetime
+        import asyncio
+
+        start = datetime(2024, 1, 1, 0, 0, 0)
+        end = datetime(2024, 1, 1, 0, 0, 1)
+        logger = ProxyObservabilityLogger()
+
+        buf = StringIO()
+        old_stdout = sys.stdout
+        try:
+            sys.stdout = buf
+            method = getattr(logger, method_name)
+            if method_name.startswith("async_"):
+                asyncio.run(method(kwargs, response_obj, start, end))
+            else:
+                method(kwargs, response_obj, start, end)
+        finally:
+            sys.stdout = old_stdout
+
+        line = buf.getvalue().strip()
+        assert line.startswith("PROXY_LOG "), f"Expected PROXY_LOG prefix, got: {line!r}"
+        return json.loads(line[len("PROXY_LOG "):])
+
+    def test_log_stream_success_event(self):
+        """log_stream_event is a no-op: per-chunk hooks produce no PROXY_LOG output.
+        The final aggregated event is handled by log_success_event.
+        """
+        kwargs = {"model": "test-model", "call_type": "completion", "stream": True}
+        response_obj = {
+            "choices": [{"finish_reason": "stop", "message": {"content": "hello"}}],
+            "usage": {"completion_tokens": 5},
+        }
+        buf = StringIO()
+        old_stdout = sys.stdout
+        try:
+            sys.stdout = buf
+            logger = ProxyObservabilityLogger()
+            logger.log_stream_event(kwargs, response_obj, datetime(2024, 1, 1), datetime(2024, 1, 1, 0, 0, 1))
+        finally:
+            sys.stdout = old_stdout
+        assert buf.getvalue() == "", "log_stream_event should produce no output (no-op per-chunk hook)"
+
+    def test_async_log_stream_success_event(self):
+        """async_log_stream_event is a no-op: per-chunk hooks produce no PROXY_LOG output.
+        The final aggregated event is handled by async_log_success_event.
+        """
+        kwargs = {"model": "test-model", "call_type": "completion", "stream": True}
+        response_obj = {
+            "choices": [{"finish_reason": "stop", "message": {"content": "hello"}}],
+            "usage": {"completion_tokens": 5},
+        }
+        buf = StringIO()
+        old_stdout = sys.stdout
+        try:
+            sys.stdout = buf
+            logger = ProxyObservabilityLogger()
+            asyncio.run(logger.async_log_stream_event(kwargs, response_obj, datetime(2024, 1, 1), datetime(2024, 1, 1, 0, 0, 1)))
+        finally:
+            sys.stdout = old_stdout
+        assert buf.getvalue() == "", "async_log_stream_event should produce no output (no-op per-chunk hook)"
+
