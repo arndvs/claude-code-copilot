@@ -32,3 +32,6 @@ QA-REPORT.md
 # Reference repos (third-party, not distributed)
 .sandcastle/engine/node_modules/
 .sandcastle/engine/package-lock.json
+
+# Local session/agent working notes (ephemeral, not distributed)
+working/
