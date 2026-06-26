@@ -18,6 +18,11 @@ Anthropic-translation adapter (the OpenAI `/v1/chat/completions` path on the sam
 server is reliable). This callback records the UPSTREAM completion's finish_reason
 and content length for every request, so when a client sees an empty response we
 can confirm from the logs whether the upstream actually returned content.
+
+Streaming note: `log_stream_event` / `async_log_stream_event` are intentional
+no-ops. LiteLLM fires those hooks once per streaming chunk, which would produce
+very noisy incomplete logs. The final aggregated completion is delivered via
+`log_success_event` / `async_log_success_event` and logged there.
 """
 
 from __future__ import annotations
@@ -108,12 +113,73 @@ def _extract(response_obj):
     return finish, content_len, ctoks
 
 
+def _extract_http_info(kwargs):
+    """Return dict with ``http_status`` (int|None) and optional ``ratelimit``.
+
+    Extracts from ``kwargs["original_response"]`` (an httpx.Response) first,
+    falling back to ``kwargs["exception"]`` which may carry ``.status_code``
+    and ``.headers``.
+
+    The ``ratelimit`` key is **omitted** when no ``x-ratelimit-*`` headers are
+    present, keeping normal log lines compact.
+
+    All code is wrapped in try/except — extraction failures degrade to
+    ``{"http_status": None}`` rather than raising.
+    """
+    result = {"http_status": None}
+    try:
+        if not isinstance(kwargs, dict):
+            return result
+
+        # --- Locate the response-like object ---
+        source = None
+        for key in ("original_response", "exception"):
+            candidate = kwargs.get(key)
+            if candidate is not None and hasattr(candidate, "status_code"):
+                source = candidate
+                break
+
+        if source is None:
+            return result
+
+        # --- status code ---
+        try:
+            status_code = source.status_code
+            if isinstance(status_code, int):
+                result["http_status"] = status_code
+        except Exception:
+            pass
+
+        # --- ratelimit headers ---
+        try:
+            headers = source.headers
+            if headers:
+                rl = {}
+                for name, value in (
+                    headers.items() if hasattr(headers, "items") else []
+                ):
+                    lower = name.lower()
+                    if lower.startswith("x-ratelimit-"):
+                        rl[lower[len("x-ratelimit-"):]] = value
+                if rl:
+                    result["ratelimit"] = rl
+        except Exception:
+            pass
+
+    except Exception:
+        pass
+    return result
+
+
 def _emit(kwargs, response_obj, start_time, end_time, status):
     try:
         rec = {"t": "proxy_log", "status": status}
         if isinstance(kwargs, dict):
             rec["model"] = kwargs.get("model")
             rec["call_type"] = kwargs.get("call_type")
+            rec["stream"] = kwargs.get("stream") if "stream" in kwargs else None
+        else:
+            rec["stream"] = None
         rec["ms"] = _duration_ms(start_time, end_time)
 
         finish, content_len, ctoks = _extract(response_obj)
@@ -124,6 +190,12 @@ def _emit(kwargs, response_obj, start_time, end_time, status):
         rec["upstream_empty"] = bool(
             status == "success" and (content_len == 0 or ctoks == 0)
         )
+
+        # HTTP status code and rate-limit headers from the upstream response.
+        http_info = _extract_http_info(kwargs)
+        rec["http_status"] = http_info.get("http_status")
+        if "ratelimit" in http_info:
+            rec["ratelimit"] = http_info["ratelimit"]
 
         print("PROXY_LOG " + json.dumps(rec, default=str), file=sys.stdout, flush=True)
     except Exception:
@@ -138,11 +210,21 @@ class ProxyObservabilityLogger(CustomLogger):
     def log_failure_event(self, kwargs, response_obj, start_time, end_time, **extra_kwargs):
         _emit(kwargs, response_obj, start_time, end_time, "failure")
 
+    def log_stream_event(self, kwargs, response_obj, start_time, end_time, **extra_kwargs):
+        # Streaming fires this hook per chunk; the final aggregated completion
+        # is handled by log_success_event after all chunks are received.
+        # Logging per-chunk would be very noisy and log incomplete content_len.
+        pass
+
     async def async_log_success_event(self, kwargs, response_obj, start_time, end_time, **extra_kwargs):
         _emit(kwargs, response_obj, start_time, end_time, "success")
 
     async def async_log_failure_event(self, kwargs, response_obj, start_time, end_time, **extra_kwargs):
         _emit(kwargs, response_obj, start_time, end_time, "failure")
+
+    async def async_log_stream_event(self, kwargs, response_obj, start_time, end_time, **extra_kwargs):
+        # Same as log_stream_event: skip per-chunk logging.
+        pass
 
 
 proxy_handler_instance = ProxyObservabilityLogger()
