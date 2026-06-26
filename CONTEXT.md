@@ -24,7 +24,7 @@ Every model entry carries four required editor headers that Copilot validates:
 
 **Auth boundary.** `general_settings.master_key` reads from `LITELLM_MASTER_KEY` env var. Claude Code authenticates to LiteLLM with this key; LiteLLM authenticates to Copilot with the OAuth token cached at `~/.config/litellm/github_copilot/`. The two credentials never cross.
 
-**Global settings.** `drop_params: true` and `additional_drop_params: ["response_format", "thinking"]` silently strip parameters Copilot doesn't support. `stream: false` on every route because Copilot's streaming support is unreliable.
+**Proxy settings.** `drop_params: true` and `additional_drop_params: ["response_format", "thinking"]` are global `litellm_settings` that silently strip parameters Copilot doesn't support. `stream: true` is set in `litellm_params` on every route to reduce empty-content 200s from the Anthropic adapter — streaming delivers chunks incrementally and avoids the adapter race where a non-streamed response can return empty content.
 
 ## 2. DB-less default mode
 
@@ -55,6 +55,7 @@ docker compose -f docker-compose.yml -f docker-compose.db.yml up --build
 |---|---|
 | `model` | Requested model name |
 | `call_type` | LiteLLM call type |
+| `stream` | Whether the request used streaming (`true`, `false`, or `null` if unknown) |
 | `ms` | Latency in milliseconds |
 | `finish` | Upstream `finish_reason` / `stop_reason` |
 | `content_len` | Text content length (0 = empty, −1 = non-string) |

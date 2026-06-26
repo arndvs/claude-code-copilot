@@ -9,6 +9,7 @@ litellm_settings:
   json_logs: true
   callbacks:
     - litellm_logger.proxy_handler_instance
+    - health_version.version_callback_instance
 
 model_list:
   # Claude Code sends hyphenated names; Copilot uses dotted names.
@@ -17,7 +18,7 @@ model_list:
   - model_name: "claude-sonnet-4-6"
     litellm_params:
       model: "github_copilot/claude-opus-4.8"
-      stream: false
+      stream: true
       extra_headers:
         Editor-Version: "vscode/1.106.3"
         Editor-Plugin-Version: "copilot/1.388.0"
@@ -28,7 +29,7 @@ model_list:
   - model_name: "claude-haiku-4-5-20251001"
     litellm_params:
       model: "github_copilot/claude-opus-4.8"
-      stream: false
+      stream: true
       extra_headers:
         Editor-Version: "vscode/1.106.3"
         Editor-Plugin-Version: "copilot/1.388.0"
@@ -39,7 +40,7 @@ model_list:
   - model_name: "claude-opus-4-6"
     litellm_params:
       model: "github_copilot/claude-opus-4.6"
-      stream: false
+      stream: true
       extra_headers:
         Editor-Version: "vscode/1.106.3"
         Editor-Plugin-Version: "copilot/1.388.0"
@@ -50,7 +51,7 @@ model_list:
   - model_name: "claude-opus-4-7"
     litellm_params:
       model: "github_copilot/claude-opus-4.7"
-      stream: false
+      stream: true
       extra_headers:
         Editor-Version: "vscode/1.106.3"
         Editor-Plugin-Version: "copilot/1.388.0"
@@ -61,7 +62,7 @@ model_list:
   - model_name: "*"
     litellm_params:
       model: "github_copilot/*"
-      stream: false
+      stream: true
       extra_headers:
         Editor-Version: "vscode/1.106.3"
         Editor-Plugin-Version: "copilot/1.388.0"
