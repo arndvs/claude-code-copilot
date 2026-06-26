@@ -9,7 +9,7 @@
 #      valid JSON with sha from local git and built_at as 'unknown' or current time
 #   2. Docker build without args: docker build + run, curl /health/version
 #      returns {"sha":"unknown","built_at":"unknown"}
-#   3. Docker build with args: docker build --build-arg GIT_SHA=... --build-arg
+#   3. Docker build with args: docker build --build-arg BUILD_SHA=... --build-arg
 #      BUILD_TIMESTAMP=... + run, curl /health/version returns correct sha/timestamp
 #   4. No auth required: curl without -H Authorization returns 200 (not 401)
 #   5. Existing /health/readiness still works unchanged
@@ -133,8 +133,8 @@ run_local_checks() {
         if [ "$sha" = "$local_sha" ]; then
             pass "sha '$sha' matches local git HEAD"
         else
-            # It's possible GIT_SHA env var is set to something else
-            fail "sha '$sha' does not match local git HEAD '$local_sha' (is GIT_SHA env var overriding?)"
+            # It's possible BUILD_SHA env var is set to something else
+            fail "sha '$sha' does not match local git HEAD '$local_sha' (is BUILD_SHA env var overriding?)"
         fi
     elif [ "$sha" = "unknown" ]; then
         fail "sha is 'unknown' in local dev (git fallback may have failed)"
@@ -255,7 +255,7 @@ run_docker_checks() {
     local test_sha="abc1234"
     local test_ts="2024-06-01T12:00:00Z"
     if docker build \
-        --build-arg "GIT_SHA=$test_sha" \
+        --build-arg "BUILD_SHA=$test_sha" \
         --build-arg "BUILD_TIMESTAMP=$test_ts" \
         -t "$DOCKER_IMAGE_CUSTOM" . >/dev/null 2>&1; then
 
@@ -325,48 +325,46 @@ run_precondition_checks() {
     echo "═══════════════════════════════════════════════════════════════"
     echo ""
 
-    # ── P1: version_endpoint.py exists ───────────────────────────
-    echo "Precondition 1: version_endpoint.py exists"
-    if [ -f "$REPO_ROOT/version_endpoint.py" ]; then
-        pass "version_endpoint.py exists"
+    # ── P1: health_version.py exists ─────────────────────────────
+    echo "Precondition 1: health_version.py exists"
+    if [ -f "$REPO_ROOT/health_version.py" ]; then
+        pass "health_version.py exists"
     else
-        fail "version_endpoint.py not found"
+        fail "health_version.py not found"
     fi
 
-    # ── P2: Dockerfile has ARG GIT_SHA and BUILD_TIMESTAMP ───────
-    echo "Precondition 2: Dockerfile declares ARG GIT_SHA and BUILD_TIMESTAMP"
-    if grep -q 'ARG GIT_SHA' "$REPO_ROOT/Dockerfile" && \
+    # ── P2: Dockerfile has ARG BUILD_SHA and BUILD_TIMESTAMP ──────
+    echo "Precondition 2: Dockerfile declares ARG BUILD_SHA and BUILD_TIMESTAMP"
+    if grep -q 'ARG BUILD_SHA' "$REPO_ROOT/Dockerfile" && \
        grep -q 'ARG BUILD_TIMESTAMP' "$REPO_ROOT/Dockerfile"; then
-        pass "Dockerfile declares both ARG GIT_SHA and ARG BUILD_TIMESTAMP"
+        pass "Dockerfile declares both ARG BUILD_SHA and ARG BUILD_TIMESTAMP"
     else
-        fail "Dockerfile missing ARG GIT_SHA or ARG BUILD_TIMESTAMP"
+        fail "Dockerfile missing ARG BUILD_SHA or ARG BUILD_TIMESTAMP"
     fi
 
     # ── P3: Dockerfile has ENV forwarding ─────────────────────────
     echo "Precondition 3: Dockerfile forwards ARGs to ENV"
-    if grep -qE 'ENV[[:space:]]+GIT_SHA=\$' "$REPO_ROOT/Dockerfile" && \
-       grep -qE 'ENV[[:space:]]+BUILD_TIMESTAMP=\$' "$REPO_ROOT/Dockerfile"; then
-        pass "Dockerfile forwards GIT_SHA and BUILD_TIMESTAMP to ENV"
+    if grep -qE 'ENV[[:space:]]+BUILD_SHA=\$\{?BUILD_SHA\}?' "$REPO_ROOT/Dockerfile" && \
+       grep -qE 'ENV[[:space:]]+BUILD_TIMESTAMP=\$\{?BUILD_TIMESTAMP\}?' "$REPO_ROOT/Dockerfile"; then
+        pass "Dockerfile forwards BUILD_SHA and BUILD_TIMESTAMP to ENV"
     else
         fail "Dockerfile missing ENV forwarding for build args"
     fi
 
-    # ── P4: Makefile sets LITELLM_WORKER_STARTUP_HOOKS ────────────
-    echo "Precondition 4: Makefile wires version_endpoint hook"
-    if grep -q 'LITELLM_WORKER_STARTUP_HOOKS' "$REPO_ROOT/Makefile" && \
-       grep -q 'version_endpoint:mount_version_endpoint' "$REPO_ROOT/Makefile"; then
-        pass "Makefile sets LITELLM_WORKER_STARTUP_HOOKS=version_endpoint:mount_version_endpoint"
+    # ── P4: litellm_config.yaml registers health_version callback ─
+    echo "Precondition 4: litellm_config.yaml registers health_version callback"
+    if grep -q 'health_version.version_callback_instance' "$REPO_ROOT/litellm_config.yaml"; then
+        pass "litellm_config.yaml registers health_version.version_callback_instance"
     else
-        fail "Makefile does not wire version_endpoint startup hook"
+        fail "litellm_config.yaml does not register health_version callback"
     fi
 
-    # ── P5: start_proxy.sh sets LITELLM_WORKER_STARTUP_HOOKS ─────
-    echo "Precondition 5: start_proxy.sh wires version_endpoint hook"
-    if grep -q 'LITELLM_WORKER_STARTUP_HOOKS' "$REPO_ROOT/start_proxy.sh" && \
-       grep -q 'version_endpoint:mount_version_endpoint' "$REPO_ROOT/start_proxy.sh"; then
-        pass "start_proxy.sh sets LITELLM_WORKER_STARTUP_HOOKS"
+    # ── P5: Dockerfile COPYs health_version.py ────────────────────
+    echo "Precondition 5: Dockerfile COPYs health_version.py"
+    if grep -q 'COPY health_version.py' "$REPO_ROOT/Dockerfile"; then
+        pass "Dockerfile COPYs health_version.py"
     else
-        fail "start_proxy.sh does not wire version_endpoint startup hook"
+        fail "Dockerfile does not COPY health_version.py"
     fi
 
     # ── P6: docs/hosted_deployment.md documents /health/version ──
@@ -377,13 +375,6 @@ run_precondition_checks() {
         fail "/health/version not found in hosted_deployment.md"
     fi
 
-    # ── P7: Dockerfile COPYs version_endpoint.py ──────────────────
-    echo "Precondition 7: Dockerfile COPYs version_endpoint.py"
-    if grep -q 'COPY version_endpoint.py' "$REPO_ROOT/Dockerfile"; then
-        pass "Dockerfile COPYs version_endpoint.py"
-    else
-        fail "Dockerfile does not COPY version_endpoint.py"
-    fi
 }
 
 # ════════════════════════════════════════════════════════════════════

@@ -150,8 +150,10 @@ fi
 
 # Verify claude-enable does not use shell-dependent ~ paths for backups
 echo "Test 1d: claude-enable uses HOME for backup paths"
+# shellcheck disable=SC2088  # intentional: grep for literal ~ path that must NOT appear
 if grep -A12 '^claude-enable:' Makefile | grep -q '~/.claude/settings.json'; then
     fail "claude-enable still uses shell-dependent ~/.claude/settings.json"
+# shellcheck disable=SC2016  # intentional: grep for literal $$ Makefile escape in source
 elif ! grep -A12 '^claude-enable:' Makefile | grep -q 'chmod 600 "\$\$BACKUP"'; then
     fail "claude-enable backup chmod does not quote BACKUP"
 else
@@ -159,8 +161,10 @@ else
 fi
 
 echo "Test 1d2: claude-disable uses HOME for backup paths"
+# shellcheck disable=SC2088  # intentional: grep for literal ~ path that must NOT appear
 if grep -A10 '^claude-disable:' Makefile | grep -q '~/.claude/settings.json'; then
     fail "claude-disable still uses shell-dependent ~/.claude/settings.json"
+# shellcheck disable=SC2016  # intentional: grep for literal $$ Makefile escape in source
 elif ! grep -A10 '^claude-disable:' Makefile | grep -q 'chmod 600 "\$\$BACKUP"'; then
     fail "claude-disable backup chmod does not quote BACKUP"
 else
@@ -278,6 +282,7 @@ JSON
     else
         fail "claude-status did not strip trailing proxy URL slash"
     fi
+# shellcheck disable=SC2016  # intentional: grep for literal $$ Makefile escape
 elif grep -q 'PROXY_URL=$${PROXY_URL%/}' Makefile; then
     pass "claude-status strips trailing proxy URL slash"
 else
@@ -338,6 +343,7 @@ EOF
 (
     cd "$FAKE_REPO"
     set -a
+    # shellcheck disable=SC1091  # .env is runtime-generated; not available at lint time
     . ./.env
     set +a
     ANTHROPIC_BASE_URL="https://shell.example.test" CLAUDE_SETTINGS_FILE="$FAKE_SETTINGS_FILE_2B" python3 scripts/claude_enable.py > /dev/null 2>&1
@@ -417,6 +423,7 @@ echo "Test 2d: claude_enable.py expands CLAUDE_SETTINGS_FILE env vars"
 FAKE_HOME_EXPAND="$TMPDIR_ROOT/home2d"
 FAKE_SETTINGS_FILE_2D="$FAKE_HOME_EXPAND/.claude/settings.json"
 mkdir -p "$FAKE_HOME_EXPAND"
+# shellcheck disable=SC2016  # intentional: single-quoted $HOME tests env-var expansion in claude_enable.py
 HOME="$FAKE_HOME_EXPAND" CLAUDE_SETTINGS_FILE='$HOME/.claude/settings.json' LITELLM_MASTER_KEY="$FAKE_KEY" python3 scripts/claude_enable.py > /dev/null 2>&1
 if [ -f "$FAKE_SETTINGS_FILE_2D" ]; then
     pass "CLAUDE_SETTINGS_FILE expands environment variables"

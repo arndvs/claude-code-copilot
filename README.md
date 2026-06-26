@@ -337,7 +337,7 @@ gh workflow run model-health.yml --repo arndvs/claude-code-copilot
 
 ```bash
 docker logs sandcastle-proxy 2>&1 | grep PROXY_LOG
-# PROXY_LOG {"t": "proxy_log", "status": "success", "model": "claude-opus-4.8", "call_type": "anthropic_messages", "ms": 1342, "finish": "end_turn", "content_len": 31, "completion_tokens": 16, "upstream_empty": false}
+# PROXY_LOG {"t": "proxy_log", "status": "success", "model": "claude-opus-4.8", "call_type": "anthropic_messages", "stream": true, "ms": 1342, "finish": "end_turn", "content_len": 31, "completion_tokens": 16, "upstream_empty": false, "http_status": 200}
 ```
 
 To spot empty-content events (upstream Copilot returning 200 with no content):

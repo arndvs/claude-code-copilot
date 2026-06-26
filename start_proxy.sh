@@ -7,6 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # Load .env if present
 if [[ -f "$SCRIPT_DIR/.env" ]]; then
   set -a
+  # shellcheck disable=SC1091  # .env is user-supplied at runtime; not available at lint time
   source "$SCRIPT_DIR/.env"
   set +a
 fi
@@ -33,7 +34,6 @@ echo ""
 
 UV_NATIVE_TLS="${UV_NATIVE_TLS:-true}" \
   PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}" \
-  LITELLM_WORKER_STARTUP_HOOKS="${LITELLM_WORKER_STARTUP_HOOKS:-version_endpoint:mount_version_endpoint}" \
   exec uv run \
   --with "litellm[proxy]" \
   litellm --config "$SCRIPT_DIR/litellm_config.yaml" --port "${PORT}"

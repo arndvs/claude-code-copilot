@@ -137,7 +137,7 @@ rm -rf ~/.config/litellm/github_copilot
 
 ```bash
 docker build \
-  --build-arg GIT_SHA=$(git rev-parse --short HEAD) \
+  --build-arg BUILD_SHA=$(git rev-parse --short HEAD) \
   --build-arg BUILD_TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
   -t claude-code-copilot-proxy:latest .
 
@@ -227,7 +227,7 @@ Expected output:
 {"sha": "abc1234", "built_at": "2024-06-01T12:00:00Z"}
 ```
 
-- `sha` — the 7-character git commit baked in at `docker build` time (via `--build-arg GIT_SHA`).
+- `sha` — the 7-character git commit baked in at `docker build` time (via `--build-arg BUILD_SHA`).
 - `built_at` — ISO 8601 UTC timestamp of the build (via `--build-arg BUILD_TIMESTAMP`).
 
 > **This replaces the need to SSH/SSM into the instance and run `git log` to check

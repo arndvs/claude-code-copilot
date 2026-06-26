@@ -104,28 +104,23 @@ echo "Test 5: Precondition checks pass on current codebase"
 # Re-implement the preconditions inline to verify independently
 preconditions_ok=true
 
-if [ ! -f "version_endpoint.py" ]; then
-    echo "     Missing: version_endpoint.py"
+if [ ! -f "health_version.py" ]; then
+    echo "     Missing: health_version.py"
     preconditions_ok=false
 fi
 
-if ! grep -q 'ARG GIT_SHA' Dockerfile || ! grep -q 'ARG BUILD_TIMESTAMP' Dockerfile; then
+if ! grep -q 'ARG BUILD_SHA' Dockerfile || ! grep -q 'ARG BUILD_TIMESTAMP' Dockerfile; then
     echo "     Missing: Dockerfile ARGs"
     preconditions_ok=false
 fi
 
-if ! grep -qE 'ENV[[:space:]]+GIT_SHA=\$' Dockerfile || ! grep -qE 'ENV[[:space:]]+BUILD_TIMESTAMP=\$' Dockerfile; then
+if ! grep -qE 'ENV[[:space:]]+BUILD_SHA=\$\{?BUILD_SHA\}?' Dockerfile || ! grep -qE 'ENV[[:space:]]+BUILD_TIMESTAMP=\$\{?BUILD_TIMESTAMP\}?' Dockerfile; then
     echo "     Missing: Dockerfile ENV forwarding"
     preconditions_ok=false
 fi
 
-if ! grep -q 'version_endpoint:mount_version_endpoint' Makefile; then
-    echo "     Missing: Makefile startup hook"
-    preconditions_ok=false
-fi
-
-if ! grep -q 'version_endpoint:mount_version_endpoint' start_proxy.sh; then
-    echo "     Missing: start_proxy.sh startup hook"
+if ! grep -q 'health_version.version_callback_instance' litellm_config.yaml; then
+    echo "     Missing: litellm_config.yaml health_version callback"
     preconditions_ok=false
 fi
 
@@ -134,8 +129,8 @@ if ! grep -q '/health/version' docs/hosted_deployment.md; then
     preconditions_ok=false
 fi
 
-if ! grep -q 'COPY version_endpoint.py' Dockerfile; then
-    echo "     Missing: Dockerfile COPY"
+if ! grep -q 'COPY health_version.py' Dockerfile; then
+    echo "     Missing: Dockerfile COPY health_version.py"
     preconditions_ok=false
 fi
 

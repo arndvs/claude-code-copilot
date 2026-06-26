@@ -26,6 +26,5 @@ ENV BUILD_TIMESTAMP=${BUILD_TIMESTAMP}
 ENV PYTHONPATH=/app
 ENV UV_NATIVE_TLS=true
 ENV LITELLM_LOCAL_MODEL_COST_MAP=true
-ENV LITELLM_WORKER_STARTUP_HOOKS=version_endpoint:mount_version_endpoint
 
 CMD ["litellm", "--config", "litellm_config.yaml", "--port", "4000", "--host", "0.0.0.0"]
