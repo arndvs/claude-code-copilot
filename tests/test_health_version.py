@@ -24,6 +24,15 @@ class TestGetVersion:
         result = get_version()
         assert result["sha"] == "abc1234"
 
+    def test_full_sha_is_truncated_to_7_chars(self, monkeypatch):
+        """A full 40-char SHA baked in at build time should be trimmed to 7 chars."""
+        full_sha = "a" * 40
+        monkeypatch.setenv("BUILD_SHA", full_sha)
+        from health_version import get_version
+
+        result = get_version()
+        assert result["sha"] == "a" * 7, f"Expected 7-char SHA, got {result['sha']!r}"
+
     def test_returns_built_at_from_env(self, monkeypatch):
         monkeypatch.setenv("BUILD_SHA", "abc1234")
         monkeypatch.setenv("BUILD_TIMESTAMP", "2024-01-15T10:30:00Z")

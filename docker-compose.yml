@@ -8,8 +8,8 @@ services:
     build:
       context: .
       args:
-        BUILD_SHA: ${BUILD_SHA:-unknown}
-        BUILD_TIMESTAMP: ${BUILD_TIMESTAMP:-unknown}
+        BUILD_SHA: "${BUILD_SHA:-unknown}"
+        BUILD_TIMESTAMP: "${BUILD_TIMESTAMP:-unknown}"
     ports:
       - "127.0.0.1:${LITELLM_PORT:-4000}:4000"
     env_file: .env
