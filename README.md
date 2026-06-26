@@ -323,7 +323,7 @@ Three automated workflows keep the hosted proxy honest — they run on GitHub Ac
 | Workflow | Schedule | On failure |
 |---|---|---|
 | **Proxy canary** | Every 30 min | Opens a `🚨 Proxy canary failing` issue labeled `proxy-canary` |
-| **Model health** | Daily 13:00 UTC | Opens a `⚠️ Model health: alias(es) failing` issue labeled `model-health` |
+| **Model health** | Daily 13:00 UTC | Opens a `⚠️ Model health: configured alias(es) failing through the proxy` issue labeled `model-health` |
 | **CI** | On every push/PR | Fails the check — blocks merging |
 
 To dispatch a health check manually:
@@ -374,9 +374,11 @@ This repo ships the [ctrlshft Sandcastle](https://github.com/arndvs/ctrlshft) ag
 | `LITELLM_MASTER_KEY` | Proxy bearer token |
 | `AGENT_PAT` | GitHub PAT so label changes trigger downstream workflows |
 
-Wire via `ctrl sandcastle-wire-secrets --repo arndvs/claude-code-copilot` (sets `LITELLM_BASE_URL` + `LITELLM_MASTER_KEY`). Set `AGENT_PAT` separately:
+Wire the proxy secrets via the GitHub CLI:
 
 ```bash
+gh secret set LITELLM_BASE_URL --repo arndvs/claude-code-copilot
+gh secret set LITELLM_MASTER_KEY --repo arndvs/claude-code-copilot
 gh secret set AGENT_PAT --repo arndvs/claude-code-copilot
 ```
 
