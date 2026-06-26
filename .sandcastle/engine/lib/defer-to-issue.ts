@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import type { ScoredComment } from "./types.js";
 import { resolveThread } from "./resolve-threads.js";
+import { postThreadReply } from "./post-review.js";
 
 interface PrContext {
   prNumber: string;
@@ -48,7 +49,7 @@ export function deferToIssue(opts: { scored: ScoredComment; pr: PrContext; threa
   // Check for existing issue with same title to avoid duplicates
   const existing = findExistingIssue({ title, owner: pr.owner, repo: pr.repo, cwd });
   if (existing) {
-    postThreadReply({ threadId, message: `Deferred to #${existing.number} — score ${score}/100 (HITL tier)`, cwd });
+    postThreadReply({ threadId, body: `Deferred to #${existing.number} — score ${score}/100 (HITL tier)`, cwd });
     resolveThread({ threadId, cwd });
     return { issueNumber: existing.number, issueUrl: existing.url };
   }
@@ -62,7 +63,7 @@ export function deferToIssue(opts: { scored: ScoredComment; pr: PrContext; threa
 
   const issueNumber = parseIssueNumber(issueUrl);
 
-  postThreadReply({ threadId, message: `Deferred to #${issueNumber} — score ${score}/100 (HITL tier)`, cwd });
+  postThreadReply({ threadId, body: `Deferred to #${issueNumber} — score ${score}/100 (HITL tier)`, cwd });
   resolveThread({ threadId, cwd });
 
   return { issueNumber, issueUrl };
@@ -91,19 +92,4 @@ function findExistingIssue(opts: { title: string; owner: string; repo: string; c
   } catch {
     return null;
   }
-}
-
-function postThreadReply(opts: { threadId: string; message: string; cwd: string }): void {
-  const mutation = `
-mutation($threadId: ID!, $body: String!) {
-  addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $threadId, body: $body }) {
-    comment { id }
-  }
-}`;
-
-  execFileSync("gh", ["api", "graphql", "-F", `threadId=${opts.threadId}`, "-F", `body=${opts.message}`, "-f", `query=${mutation}`], {
-    encoding: "utf8",
-    cwd: opts.cwd,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
 }

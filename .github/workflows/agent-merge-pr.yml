@@ -62,14 +62,19 @@ jobs:
         run: |
           corepack enable
           cd .sandcastle/engine
-          npm install
+          pnpm install --frozen-lockfile
           echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
 
       - name: Mark PR ready (un-draft)
         env:
           GITHUB_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
         run: |
-          gh pr ready "$PR_NUMBER" -R ${{ github.repository }} 2>/dev/null || true
+          is_draft=$(gh pr view "$PR_NUMBER" -R ${{ github.repository }} --json isDraft --jq '.isDraft')
+          if [ "$is_draft" = "true" ]; then
+            gh pr ready "$PR_NUMBER" -R ${{ github.repository }}
+          else
+            echo "PR #$PR_NUMBER is already marked ready; skipping."
+          fi
 
       - name: Run merge
         env:

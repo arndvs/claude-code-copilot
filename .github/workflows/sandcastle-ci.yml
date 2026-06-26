@@ -1,0 +1,46 @@
+name: "Sandcastle CI"
+
+# Validates the vendored Sandcastle engine: dependencies install cleanly against
+# the committed lockfile and the TypeScript sources typecheck. Proxy-independent —
+# vendored into every Sandcastle install. Runs whenever the engine changes
+# (e.g. after `ctrl update-sandcastle` re-vendors it).
+
+on:
+  push:
+    paths:
+      - ".sandcastle/engine/**"
+      - ".github/workflows/sandcastle-ci.yml"
+  pull_request:
+    paths:
+      - ".sandcastle/engine/**"
+      - ".github/workflows/sandcastle-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  engine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install engine dependencies (frozen)
+        run: |
+          cd .sandcastle/engine
+          pnpm install --frozen-lockfile
+
+      - name: Typecheck engine
+        run: |
+          cd .sandcastle/engine
+          pnpm run typecheck

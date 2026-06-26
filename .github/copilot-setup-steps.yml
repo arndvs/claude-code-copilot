@@ -28,5 +28,7 @@ jobs:
       - name: Enable Corepack
         run: corepack enable
 
-      - name: Install dependencies
-        run: npm install
+      - name: Install engine dependencies
+        run: |
+          cd .sandcastle/engine
+          pnpm install --frozen-lockfile
