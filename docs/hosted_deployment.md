@@ -136,7 +136,10 @@ rm -rf ~/.config/litellm/github_copilot
 > **Mount the token read-write (**`:rw`**).** LiteLLM refreshes the Copilot token periodically and must write the new value back to `api-key.json`. A read-only (`:ro`) mount causes requests to start failing with a `Read-only file system … api-key.json` error once the token needs refreshing.
 
 ```bash
-docker build -t claude-code-copilot-proxy:latest .
+docker build \
+  --build-arg GIT_SHA=$(git rev-parse --short HEAD) \
+  --build-arg BUILD_TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+  -t claude-code-copilot-proxy:latest .
 
 docker run -d --name proxy --restart unless-stopped \
   --env-file .env \
@@ -148,6 +151,7 @@ docker run -d --name proxy --restart unless-stopped \
 
 Notes:
 
+- The `--build-arg` flags bake the git commit SHA and build timestamp into the image, exposed via `/health/version`.
 - `-p 127.0.0.1:4000:4000` binds to **localhost only** — the proxy is never directly internet-reachable. Verify with `ss -tlnp | grep 4000` (expect `127.0.0.1:4000`, not `0.0.0.0:4000`).
 - `--restart unless-stopped` brings the container back automatically after a reboot or crash.
 - **Changing env vars (e.g. rotating the key) requires** `docker rm -f` **+ a fresh** `docker run`**, not** `docker restart` — a restart reuses the original environment and will keep serving the old key. See §7.
@@ -207,6 +211,28 @@ curl -s https://proxy.example.com/health/version
 Expected: (A) a completion, (B) `401`, (C) a timeout/`000`, (D) JSON with `sha` and `built_at`.
 
 **Reboot-survival test:** reboot the instance, wait a few minutes, and re-run check (A) from your external machine. If it returns a completion with no manual intervention, the auto-restart chain (Docker → both containers → persisted cert → persisted token) is sound.
+
+### Confirm deployed version
+
+After a redeploy, confirm which code is running without SSH/SSM access:
+
+```bash
+# D) check deployed version — no auth required
+curl -s https://proxy.example.com/health/version
+```
+
+Expected output:
+
+```json
+{"sha": "abc1234", "built_at": "2024-06-01T12:00:00Z"}
+```
+
+- `sha` — the 7-character git commit baked in at `docker build` time (via `--build-arg GIT_SHA`).
+- `built_at` — ISO 8601 UTC timestamp of the build (via `--build-arg BUILD_TIMESTAMP`).
+
+> **This replaces the need to SSH/SSM into the instance and run `git log` to check
+> which version is deployed.** After any redeploy (§8), hit `/health/version` from
+> your workstation to confirm the new SHA matches the commit you pushed.
 
 ---
 

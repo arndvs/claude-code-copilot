@@ -31,6 +31,9 @@ echo "  ANTHROPIC_AUTH_TOKEN=<set to your LITELLM_MASTER_KEY>"
 echo "  CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1"
 echo ""
 
-UV_NATIVE_TLS="${UV_NATIVE_TLS:-true}" exec uv run \
+UV_NATIVE_TLS="${UV_NATIVE_TLS:-true}" \
+  PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}" \
+  LITELLM_WORKER_STARTUP_HOOKS="${LITELLM_WORKER_STARTUP_HOOKS:-version_endpoint:mount_version_endpoint}" \
+  exec uv run \
   --with "litellm[proxy]" \
   litellm --config "$SCRIPT_DIR/litellm_config.yaml" --port "${PORT}"
