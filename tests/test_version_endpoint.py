@@ -122,7 +122,9 @@ class TestMountVersionEndpoint:
             resp = client.get("/health/version")
 
         assert resp.status_code == 200
-        assert resp.headers["content-type"] == "application/json"
+        assert resp.headers["content-type"].startswith("application/json"), (
+            f"Expected application/json content-type, got: {resp.headers['content-type']}"
+        )
         data = resp.json()
         assert data["sha"] == "test123"
         assert data["built_at"] == "2024-06-01T12:00:00Z"

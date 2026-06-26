@@ -23,8 +23,8 @@ fail() { FAIL=$((FAIL + 1)); echo "  ❌ $1"; }
 
 # ── Test 1: Dockerfile declares ARG GIT_SHA with default ──────────
 echo "Test 1: Dockerfile declares ARG GIT_SHA with sensible default"
-if grep -qE '^\s*ARG\s+GIT_SHA=' Dockerfile; then
-    DEFAULT_SHA=$(grep -E '^\s*ARG\s+GIT_SHA=' Dockerfile | head -1 | sed 's/.*GIT_SHA=//')
+if grep -qE '^[[:space:]]*ARG[[:space:]]+GIT_SHA=' Dockerfile; then
+    DEFAULT_SHA=$(grep -E '^[[:space:]]*ARG[[:space:]]+GIT_SHA=' Dockerfile | head -1 | sed 's/.*GIT_SHA=//')
     if [ "$DEFAULT_SHA" = "unknown" ]; then
         pass "ARG GIT_SHA=unknown declared"
     else
@@ -36,8 +36,8 @@ fi
 
 # ── Test 2: Dockerfile declares ARG BUILD_TIMESTAMP with default ──
 echo "Test 2: Dockerfile declares ARG BUILD_TIMESTAMP with sensible default"
-if grep -qE '^\s*ARG\s+BUILD_TIMESTAMP=' Dockerfile; then
-    DEFAULT_TS=$(grep -E '^\s*ARG\s+BUILD_TIMESTAMP=' Dockerfile | head -1 | sed 's/.*BUILD_TIMESTAMP=//')
+if grep -qE '^[[:space:]]*ARG[[:space:]]+BUILD_TIMESTAMP=' Dockerfile; then
+    DEFAULT_TS=$(grep -E '^[[:space:]]*ARG[[:space:]]+BUILD_TIMESTAMP=' Dockerfile | head -1 | sed 's/.*BUILD_TIMESTAMP=//')
     if [ "$DEFAULT_TS" = "unknown" ]; then
         pass "ARG BUILD_TIMESTAMP=unknown declared"
     else
@@ -49,9 +49,9 @@ fi
 
 # ── Test 3: Dockerfile forwards GIT_SHA to ENV ────────────────────
 echo "Test 3: Dockerfile forwards GIT_SHA ARG to ENV"
-if grep -qE '^\s*ENV\s+GIT_SHA=' Dockerfile; then
+if grep -qE '^[[:space:]]*ENV[[:space:]]+GIT_SHA=' Dockerfile; then
     # Verify it references the ARG (ENV GIT_SHA=$GIT_SHA or ENV GIT_SHA=${GIT_SHA})
-    if grep -qE '^\s*ENV\s+GIT_SHA=\$\{?GIT_SHA\}?' Dockerfile; then
+    if grep -qE '^[[:space:]]*ENV[[:space:]]+GIT_SHA=\$\{?GIT_SHA\}?' Dockerfile; then
         pass "ENV GIT_SHA=\$GIT_SHA declared"
     else
         fail "ENV GIT_SHA is set but does not reference the ARG variable"
@@ -62,8 +62,8 @@ fi
 
 # ── Test 4: Dockerfile forwards BUILD_TIMESTAMP to ENV ────────────
 echo "Test 4: Dockerfile forwards BUILD_TIMESTAMP ARG to ENV"
-if grep -qE '^\s*ENV\s+BUILD_TIMESTAMP=' Dockerfile; then
-    if grep -qE '^\s*ENV\s+BUILD_TIMESTAMP=\$\{?BUILD_TIMESTAMP\}?' Dockerfile; then
+if grep -qE '^[[:space:]]*ENV[[:space:]]+BUILD_TIMESTAMP=' Dockerfile; then
+    if grep -qE '^[[:space:]]*ENV[[:space:]]+BUILD_TIMESTAMP=\$\{?BUILD_TIMESTAMP\}?' Dockerfile; then
         pass "ENV BUILD_TIMESTAMP=\$BUILD_TIMESTAMP declared"
     else
         fail "ENV BUILD_TIMESTAMP is set but does not reference the ARG variable"

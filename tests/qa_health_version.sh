@@ -107,13 +107,13 @@ run_local_checks() {
 
     # ── Check 1: /health/version returns valid JSON ──────────────
     echo "Check 1: GET /health/version returns valid JSON with sha and built_at"
+    local sha="" built_at=""
     local response
     response=$(curl -sf "$PROXY_URL/health/version" 2>/dev/null || echo "")
     if [ -z "$response" ]; then
         fail "GET /health/version returned empty response or non-200"
     else
         # Validate JSON structure
-        local sha="" built_at=""
         sha=$(echo "$response" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['sha'])" 2>/dev/null || echo "")
         built_at=$(echo "$response" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['built_at'])" 2>/dev/null || echo "")
 
@@ -225,10 +225,10 @@ run_docker_checks() {
             "$DOCKER_IMAGE_DEFAULT" >/dev/null 2>&1
 
         if wait_for_proxy "http://localhost:${test_port}" 60; then
-            local response
+    local sha="" built_at=""
+    local response
             response=$(curl -sf "http://localhost:${test_port}/health/version" 2>/dev/null || echo "")
             if [ -n "$response" ]; then
-                local sha="" built_at=""
                 sha=$(echo "$response" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['sha'])" 2>/dev/null || echo "")
                 built_at=$(echo "$response" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['built_at'])" 2>/dev/null || echo "")
 
@@ -264,10 +264,10 @@ run_docker_checks() {
             "$DOCKER_IMAGE_CUSTOM" >/dev/null 2>&1
 
         if wait_for_proxy "http://localhost:${test_port}" 60; then
-            local response
+    local sha="" built_at=""
+    local response
             response=$(curl -sf "http://localhost:${test_port}/health/version" 2>/dev/null || echo "")
             if [ -n "$response" ]; then
-                local sha="" built_at=""
                 sha=$(echo "$response" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['sha'])" 2>/dev/null || echo "")
                 built_at=$(echo "$response" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['built_at'])" 2>/dev/null || echo "")
 
@@ -341,8 +341,8 @@ run_precondition_checks() {
 
     # ── P3: Dockerfile has ENV forwarding ─────────────────────────
     echo "Precondition 3: Dockerfile forwards ARGs to ENV"
-    if grep -qE 'ENV\s+GIT_SHA=\$' "$REPO_ROOT/Dockerfile" && \
-       grep -qE 'ENV\s+BUILD_TIMESTAMP=\$' "$REPO_ROOT/Dockerfile"; then
+    if grep -qE 'ENV[[:space:]]+GIT_SHA=\$' "$REPO_ROOT/Dockerfile" && \
+       grep -qE 'ENV[[:space:]]+BUILD_TIMESTAMP=\$' "$REPO_ROOT/Dockerfile"; then
         pass "Dockerfile forwards GIT_SHA and BUILD_TIMESTAMP to ENV"
     else
         fail "Dockerfile missing ENV forwarding for build args"

@@ -35,8 +35,8 @@ joined_doc=$(sed ':a;/\\$/N;s/\\\n//;ta' "$DOC")
 
 # ── Test 1: Every 'docker build' line includes --build-arg GIT_SHA ──────────
 echo "Test 1: Every 'docker build' command includes --build-arg GIT_SHA"
-build_lines=$(echo "$joined_doc" | grep -E 'docker build\s+-' | grep -cv 'docker builder' || true)
-sha_lines=$(echo "$joined_doc" | grep -E 'docker build\s+-' | grep -v 'docker builder' | grep -c '\-\-build-arg.*GIT_SHA' || true)
+build_lines=$(echo "$joined_doc" | grep -E 'docker build[[:space:]]+-' | grep -cv 'docker builder' || true)
+sha_lines=$(echo "$joined_doc" | grep -E 'docker build[[:space:]]+-' | grep -v 'docker builder' | grep -c '\-\-build-arg.*GIT_SHA' || true)
 
 if [ "$build_lines" -eq 0 ]; then
     fail "No 'docker build' commands found in $DOC"
@@ -48,7 +48,7 @@ fi
 
 # ── Test 2: Every 'docker build' line includes --build-arg BUILD_TIMESTAMP ──
 echo "Test 2: Every 'docker build' command includes --build-arg BUILD_TIMESTAMP"
-ts_lines=$(echo "$joined_doc" | grep -E 'docker build\s+-' | grep -v 'docker builder' | grep -c '\-\-build-arg.*BUILD_TIMESTAMP' || true)
+ts_lines=$(echo "$joined_doc" | grep -E 'docker build[[:space:]]+-' | grep -v 'docker builder' | grep -c '\-\-build-arg.*BUILD_TIMESTAMP' || true)
 
 if [ "$build_lines" -eq 0 ]; then
     fail "No 'docker build' commands found in $DOC"
@@ -60,7 +60,7 @@ fi
 
 # ── Test 3: GIT_SHA uses git rev-parse --short HEAD ────────────────────────
 echo "Test 3: GIT_SHA build-arg uses git rev-parse --short HEAD"
-sha_correct=$(echo "$joined_doc" | grep -E 'docker build\s+-' | grep -v 'docker builder' | grep -c 'GIT_SHA=\$(git rev-parse --short HEAD)' || true)
+sha_correct=$(echo "$joined_doc" | grep -E 'docker build[[:space:]]+-' | grep -v 'docker builder' | grep -c 'GIT_SHA=\$(git rev-parse --short HEAD)' || true)
 
 if [ "$build_lines" -eq "$sha_correct" ]; then
     pass "All docker build commands use GIT_SHA=\$(git rev-parse --short HEAD)"
@@ -70,7 +70,7 @@ fi
 
 # ── Test 4: BUILD_TIMESTAMP uses date -u ISO format ───────────────────────
 echo "Test 4: BUILD_TIMESTAMP build-arg uses date -u ISO format"
-ts_correct=$(echo "$joined_doc" | grep -E 'docker build\s+-' | grep -v 'docker builder' | grep -c 'BUILD_TIMESTAMP=\$(date -u' || true)
+ts_correct=$(echo "$joined_doc" | grep -E 'docker build[[:space:]]+-' | grep -v 'docker builder' | grep -c 'BUILD_TIMESTAMP=\$(date -u' || true)
 
 if [ "$build_lines" -eq "$ts_correct" ]; then
     pass "All docker build commands use BUILD_TIMESTAMP=\$(date -u ...)"

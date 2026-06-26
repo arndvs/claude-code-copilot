@@ -114,7 +114,7 @@ if ! grep -q 'ARG GIT_SHA' Dockerfile || ! grep -q 'ARG BUILD_TIMESTAMP' Dockerf
     preconditions_ok=false
 fi
 
-if ! grep -qE 'ENV\s+GIT_SHA=\$' Dockerfile || ! grep -qE 'ENV\s+BUILD_TIMESTAMP=\$' Dockerfile; then
+if ! grep -qE 'ENV[[:space:]]+GIT_SHA=\$' Dockerfile || ! grep -qE 'ENV[[:space:]]+BUILD_TIMESTAMP=\$' Dockerfile; then
     echo "     Missing: Dockerfile ENV forwarding"
     preconditions_ok=false
 fi

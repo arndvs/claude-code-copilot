@@ -25,6 +25,11 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 
+# Directory of this file — used as cwd for git fallback so it works regardless
+# of the process working directory.
+_MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
 def get_version_info() -> dict:
     """Return {"sha": "...", "built_at": "..."} from env vars or git fallback."""
     sha = os.environ.get("GIT_SHA", "").strip()
@@ -48,6 +53,7 @@ def _git_sha_fallback() -> str:
             capture_output=True,
             text=True,
             timeout=5,
+            cwd=_MODULE_DIR,
         )
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
