@@ -819,12 +819,11 @@ class TestStreamingCallbacks:
         old_stdout = sys.stdout
         try:
             sys.stdout = buf
-            _emit(None, None, start, end, "success")
+            logger = ProxyObservabilityLogger()
+            asyncio.run(logger.async_log_stream_event(kwargs, response_obj, datetime(2024, 1, 1), datetime(2024, 1, 1, 0, 0, 1)))
         finally:
             sys.stdout = old_stdout
-        # Should still produce output (http_status will be None)
-        line = buf.getvalue().strip()
-        self.assertTrue(line.startswith("PROXY_LOG "))
+        assert buf.getvalue() == "", "async_log_stream_event should produce no output (no-op per-chunk hook)"
 
     def test_emit_with_all_none(self):
         """When everything is None, _emit should not crash."""
