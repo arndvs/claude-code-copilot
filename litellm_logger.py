@@ -19,10 +19,10 @@ server is reliable). This callback records the UPSTREAM completion's finish_reas
 and content length for every request, so when a client sees an empty response we
 can confirm from the logs whether the upstream actually returned content.
 
-Streaming support: the logger also handles `log_stream_event` /
-`async_log_stream_event` callbacks for when routes are configured with
-`stream: true`. The `stream` field in log output lets operators correlate
-streaming mode with empty-content rates.
+Streaming note: `log_stream_event` / `async_log_stream_event` are intentional
+no-ops. LiteLLM fires those hooks once per streaming chunk, which would produce
+very noisy incomplete logs. The final aggregated completion is delivered via
+`log_success_event` / `async_log_success_event` and logged there.
 """
 
 from __future__ import annotations

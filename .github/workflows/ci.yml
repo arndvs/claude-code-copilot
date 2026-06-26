@@ -22,7 +22,7 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install PyYAML
+      - name: Install Python dependencies
         run: pip install pyyaml pytest
 
       - name: Run Python unit tests
