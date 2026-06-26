@@ -19,6 +19,7 @@ import sys
 import unittest
 from datetime import datetime
 from io import StringIO
+from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from litellm_logger import _duration_ms, _extract, _extract_http_info, _emit, ProxyObservabilityLogger
@@ -701,6 +702,14 @@ class TestEmitDefensiveNoCrash(unittest.TestCase):
         """When kwargs is None, _emit should not crash."""
         start = datetime(2024, 1, 1, 0, 0, 0)
         end = datetime(2024, 1, 1, 0, 0, 1)
+        buf = StringIO()
+        old_stdout = sys.stdout
+        try:
+            sys.stdout = buf
+            _emit(None, None, start, end, "success")
+        finally:
+            sys.stdout = old_stdout
+        raw_line = buf.getvalue().strip()
         assert "SECRET_CONTENT_SHOULD_NOT_APPEAR" not in raw_line
 
 
@@ -827,10 +836,10 @@ class TestStreamingCallbacks:
         finally:
             sys.stdout = old_stdout
         line = buf.getvalue().strip()
-        self.assertTrue(line.startswith("PROXY_LOG "))
+        assert line.startswith("PROXY_LOG "), f"Expected PROXY_LOG prefix, got: {line!r}"
         rec = json.loads(line[len("PROXY_LOG "):])
-        self.assertEqual(rec["status"], "failure")
-        self.assertIsNone(rec["ms"])
+        assert rec["status"] == "failure"
+        assert rec["ms"] is None
 
 
 # ============================================================# ProxyObservabilityLogger class — verify dispatch
