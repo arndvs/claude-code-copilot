@@ -273,7 +273,7 @@ shft proxy status                                # check health + PID
 # afk.sh and once.sh source _proxy_env.sh before invoking Claude
 ```
 
-Also compatible with [Sandcastle](https://github.com/mattpocock/sandcastle) or any tool that respects `ANTHROPIC_BASE_URL`.
+Also compatible with [ctrlshft Sandcastle](https://github.com/arndvs/ctrlshft) agent workflows or any tool that respects `ANTHROPIC_BASE_URL`.
 
 ### Standalone autonomous use
 
@@ -313,6 +313,84 @@ model_list:
 ```
 
 **Note:** Multiple `model_list` entries alone do not enable automatic fallback. LiteLLM requires explicit [`fallbacks:` router configuration](https://docs.litellm.ai/docs/routing#fallbacks) to retry on a different deployment when Copilot rate limits are hit.
+
+---
+
+## Health monitoring
+
+Three automated workflows keep the hosted proxy honest — they run on GitHub Actions runners and require no local setup once the repo secrets are set.
+
+| Workflow | Schedule | On failure |
+|---|---|---|
+| **Proxy canary** | Every 30 min | Opens a `🚨 Proxy canary failing` issue labeled `proxy-canary` |
+| **Model health** | Daily 13:00 UTC | Opens a `⚠️ Model health: configured alias(es) failing through the proxy` issue labeled `model-health` |
+| **CI** | On every push/PR | Fails the check — blocks merging |
+
+To dispatch a health check manually:
+
+```bash
+gh workflow run proxy-canary.yml --repo arndvs/claude-code-copilot
+gh workflow run model-health.yml --repo arndvs/claude-code-copilot
+```
+
+**Watch the live logs** — every completion emits a `PROXY_LOG` JSON line:
+
+```bash
+docker logs sandcastle-proxy 2>&1 | grep PROXY_LOG
+# PROXY_LOG {"t": "proxy_log", "status": "success", "model": "claude-opus-4.8", "call_type": "anthropic_messages", "ms": 1342, "finish": "end_turn", "content_len": 31, "completion_tokens": 16, "upstream_empty": false}
+```
+
+To spot empty-content events (upstream Copilot returning 200 with no content):
+
+```bash
+docker logs sandcastle-proxy 2>&1 | grep '"upstream_empty": true'
+```
+
+For a one-off deep trace, recreate the container temporarily with `LITELLM_LOG=DEBUG` — see [docs/hosted_deployment.md](docs/hosted_deployment.md#observability--debugging-empty-completions).
+
+---
+
+## Sandcastle agent platform
+
+This repo ships the [ctrlshft Sandcastle](https://github.com/arndvs/ctrlshft) agent platform — a set of label-driven GitHub Actions workflows that let AI agents implement, review, and merge issues without local tooling.
+
+### Label reference
+
+| Label | What triggers | Effect |
+|---|---|---|
+| `agent:review` | Triage an issue | Decomposes into sub-tasks, transitions to next state |
+| `agent:implement` | Implement an issue | Opens a draft PR on a new branch |
+| `agent:fix` | Fix PR review feedback | Addresses reviewer comments, pushes to the PR branch |
+| `agent:update-branch` | Sync PR with base branch | Rebases/merges base into the PR branch |
+| `agent:merge` | Merge a PR | Un-drafts + squash-merges the PR, deletes the branch |
+| `agent:implement-prd` | Implement a PRD issue | Iterates through sub-issues one by one, building one PR |
+| `Sandcastle` | Review + triage | Agent reads the issue and applies the right next label |
+
+### Secrets required
+
+| Secret | Purpose |
+|---|---|
+| `LITELLM_BASE_URL` | Proxy URL (`https://sandcastle-proxy.arndvs.com`) |
+| `LITELLM_MASTER_KEY` | Proxy bearer token |
+| `AGENT_PAT` | GitHub PAT so label changes trigger downstream workflows |
+
+Wire the proxy secrets via the GitHub CLI:
+
+```bash
+gh secret set LITELLM_BASE_URL --repo arndvs/claude-code-copilot
+gh secret set LITELLM_MASTER_KEY --repo arndvs/claude-code-copilot
+gh secret set AGENT_PAT --repo arndvs/claude-code-copilot
+```
+
+### Example: open an issue and let the agent handle it
+
+```bash
+gh issue create --repo arndvs/claude-code-copilot \
+  --title "Add request-id header to PROXY_LOG" \
+  --body "Log the x-request-id header when present so completions can be correlated across logs." \
+  --label "agent:review"
+# Walk away. The agent plans, implements, opens a PR, and waits for agent:merge.
+```
 
 ---
 
