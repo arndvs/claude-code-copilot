@@ -2,7 +2,7 @@
 
 Covers:
 - get_version_info() returns correct dict from env vars
-- git rev-parse fallback when GIT_SHA is unset
+- git rev-parse fallback when BUILD_SHA is unset
 - 'unknown' fallback when both env and git are unavailable
 - mount_version_endpoint() registers the route on the FastAPI app
 """
@@ -26,28 +26,28 @@ class TestGetVersionInfoFromEnv:
     """When env vars are set, they should be reflected in the response."""
 
     def test_sha_from_env(self):
-        with patch.dict(os.environ, {"GIT_SHA": "abc1234", "BUILD_TIMESTAMP": "2024-01-01T00:00:00Z"}):
+        with patch.dict(os.environ, {"BUILD_SHA": "abc1234", "BUILD_TIMESTAMP": "2024-01-01T00:00:00Z"}):
             info = get_version_info()
         assert info["sha"] == "abc1234"
 
     def test_built_at_from_env(self):
-        with patch.dict(os.environ, {"GIT_SHA": "abc1234", "BUILD_TIMESTAMP": "2024-01-01T00:00:00Z"}):
+        with patch.dict(os.environ, {"BUILD_SHA": "abc1234", "BUILD_TIMESTAMP": "2024-01-01T00:00:00Z"}):
             info = get_version_info()
         assert info["built_at"] == "2024-01-01T00:00:00Z"
 
     def test_response_has_exactly_two_keys(self):
-        with patch.dict(os.environ, {"GIT_SHA": "abc1234", "BUILD_TIMESTAMP": "2024-01-01T00:00:00Z"}):
+        with patch.dict(os.environ, {"BUILD_SHA": "abc1234", "BUILD_TIMESTAMP": "2024-01-01T00:00:00Z"}):
             info = get_version_info()
         assert set(info.keys()) == {"sha", "built_at"}
 
 
 class TestGetVersionInfoGitFallback:
-    """When GIT_SHA env is unset/empty, fall back to git rev-parse --short HEAD."""
+    """When BUILD_SHA env is unset/empty, fall back to git rev-parse --short HEAD."""
 
     def test_sha_falls_back_to_git(self):
         with patch.dict(os.environ, {"BUILD_TIMESTAMP": "2024-01-01T00:00:00Z"}, clear=False):
             env = os.environ.copy()
-            env.pop("GIT_SHA", None)
+            env.pop("BUILD_SHA", None)
             with patch.dict(os.environ, env, clear=True):
                 with patch("version_endpoint.subprocess.run") as mock_run:
                     mock_run.return_value = MagicMock(
@@ -60,7 +60,7 @@ class TestGetVersionInfoGitFallback:
     def test_sha_unknown_when_git_fails(self):
         """When env is unset and git rev-parse fails, sha should be 'unknown'."""
         env = os.environ.copy()
-        env.pop("GIT_SHA", None)
+        env.pop("BUILD_SHA", None)
         with patch.dict(os.environ, env, clear=True):
             with patch("version_endpoint.subprocess.run") as mock_run:
                 mock_run.side_effect = Exception("git not found")
@@ -69,7 +69,7 @@ class TestGetVersionInfoGitFallback:
 
     def test_sha_unknown_when_env_is_literal_unknown(self):
         """The Dockerfile default 'unknown' should trigger git fallback."""
-        with patch.dict(os.environ, {"GIT_SHA": "unknown", "BUILD_TIMESTAMP": "ts"}):
+        with patch.dict(os.environ, {"BUILD_SHA": "unknown", "BUILD_TIMESTAMP": "ts"}):
             with patch("version_endpoint.subprocess.run") as mock_run:
                 mock_run.return_value = MagicMock(returncode=0, stdout="face123\n")
                 info = get_version_info()
@@ -84,13 +84,13 @@ class TestGetVersionInfoBuildTimestamp:
         env = os.environ.copy()
         env.pop("BUILD_TIMESTAMP", None)
         with patch.dict(os.environ, env, clear=True):
-            with patch.dict(os.environ, {"GIT_SHA": "abc1234"}):
+            with patch.dict(os.environ, {"BUILD_SHA": "abc1234"}):
                 info = get_version_info()
         assert info["built_at"] == "unknown"
 
     def test_built_at_unknown_when_env_is_literal_unknown(self):
         """The Dockerfile default 'unknown' for BUILD_TIMESTAMP stays as 'unknown'."""
-        with patch.dict(os.environ, {"GIT_SHA": "abc1234", "BUILD_TIMESTAMP": "unknown"}):
+        with patch.dict(os.environ, {"BUILD_SHA": "abc1234", "BUILD_TIMESTAMP": "unknown"}):
             info = get_version_info()
         assert info["built_at"] == "unknown"
 
@@ -114,7 +114,7 @@ class TestMountVersionEndpoint:
             mount_version_endpoint()
 
         client = TestClient(app)
-        with patch.dict(os.environ, {"GIT_SHA": "test123", "BUILD_TIMESTAMP": "2024-06-01T12:00:00Z"}):
+        with patch.dict(os.environ, {"BUILD_SHA": "test123", "BUILD_TIMESTAMP": "2024-06-01T12:00:00Z"}):
             resp = client.get("/health/version")
 
         assert resp.status_code == 200
@@ -136,7 +136,7 @@ class TestMountVersionEndpoint:
             mount_version_endpoint()
 
         client = TestClient(app)
-        with patch.dict(os.environ, {"GIT_SHA": "noauth", "BUILD_TIMESTAMP": "ts"}):
+        with patch.dict(os.environ, {"BUILD_SHA": "noauth", "BUILD_TIMESTAMP": "ts"}):
             # No Authorization header
             resp = client.get("/health/version")
 

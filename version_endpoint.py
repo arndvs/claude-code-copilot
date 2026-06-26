@@ -9,10 +9,10 @@ Integration:
   registered when the proxy starts.
 
 Environment variables consumed:
-  GIT_SHA           — baked at docker build via --build-arg (default: 'unknown')
+  BUILD_SHA         — baked at docker build via --build-arg (default: 'unknown')
   BUILD_TIMESTAMP   — baked at docker build via --build-arg (default: 'unknown')
 
-When GIT_SHA is unset or 'unknown', the endpoint falls back to
+When BUILD_SHA is unset or 'unknown', the endpoint falls back to
 `git rev-parse --short HEAD` for local development.
 """
 
@@ -32,7 +32,7 @@ _MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def get_version_info() -> dict:
     """Return {"sha": "...", "built_at": "..."} from env vars or git fallback."""
-    sha = os.environ.get("GIT_SHA", "").strip()
+    sha = os.environ.get("BUILD_SHA", "").strip()
 
     # Fall back to live git if env is missing or is the Dockerfile default
     if not sha or sha == "unknown":
