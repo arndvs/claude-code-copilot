@@ -60,8 +60,10 @@ fi
 
 # ── Test 3: BUILD_SHA uses a dynamic value (git rev-parse or variable) ──────
 echo "Test 3: BUILD_SHA build-arg uses a dynamic value (git rev-parse or variable)"
-# Accepts quoted and unquoted forms: BUILD_SHA=$(git ...) or BUILD_SHA="$(git ...)" or BUILD_SHA="$SHA"
-sha_correct=$(echo "$joined_doc" | grep -E 'docker build[[:space:]]+-' | grep -v 'docker builder' | grep -cE '\-\-build-arg.*BUILD_SHA="?\$' || true)
+# Accepts all documented forms: BUILD_SHA=$(git ...) or BUILD_SHA="$(git ...)" or BUILD_SHA="$SHA"
+# Use a character class ["$] to match either a leading quote or dollar sign — avoids
+# ambiguity with \$ at end of ERE which some grep implementations treat as end-of-line.
+sha_correct=$(echo "$joined_doc" | grep -E 'docker build[[:space:]]+-' | grep -v 'docker builder' | grep -cE '\-\-build-arg.*BUILD_SHA=["$]' || true)
 
 if [ "$build_lines" -eq "$sha_correct" ]; then
     pass "All docker build commands use a dynamic BUILD_SHA value"
