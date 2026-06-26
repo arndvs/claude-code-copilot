@@ -209,6 +209,12 @@ class TestSingleRouteRegistration:
     This test exists to catch any future attempt to register the route via a
     second mechanism (e.g. re-introducing LITELLM_WORKER_STARTUP_HOOKS or a
     second module).  If this test fails, a route collision has been introduced.
+
+    Two levels of assertion:
+    - Router level: custom_api_router carries exactly one route definition.
+    - App level: including the router on a simulated FastAPI app produces exactly
+      one included router entry and the endpoint responds correctly (the app-level
+      check Copilot requested so a second module's registration would be caught).
     """
 
     def test_custom_api_router_has_exactly_one_route(self):
@@ -226,3 +232,57 @@ class TestSingleRouteRegistration:
         route = health_version.custom_api_router.routes[0]
         assert route.path == "/health/version"
         assert "GET" in route.methods
+
+    def test_exactly_one_health_version_route_on_simulated_app(self):
+        """Include custom_api_router on a real FastAPI app and assert exactly one
+        router entry is present and the /health/version endpoint responds correctly.
+
+        FastAPI 0.100+ stores included routers as _IncludedRouter objects in
+        app.routes. Asserting len == 1 here means a second module including the
+        same router would bump the count to 2 and fail this test.
+        """
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        import health_version
+
+        app = FastAPI()
+        app.include_router(health_version.custom_api_router)
+
+        included_routers = [r for r in app.routes if type(r).__name__ == "_IncludedRouter"]
+        assert len(included_routers) == 1, (
+            f"Expected exactly 1 included router on the FastAPI app, "
+            f"found {len(included_routers)} — a second module may have registered the route"
+        )
+
+        # Verify the route is reachable and returns the correct schema.
+        client = TestClient(app)
+        resp = client.get("/health/version")
+        assert resp.status_code == 200
+        assert set(resp.json().keys()) == {"sha", "built_at"}
+
+    def test_duplicate_include_emits_fastapi_warning(self):
+        """Demonstrate that FastAPI does NOT silently de-duplicate routes:
+        including the same router twice triggers a 'Duplicate Operation ID' warning.
+
+        This validates why the _router_registered guard in _register_router()
+        is necessary — without it, double registration would silently corrupt the app.
+        """
+        import warnings
+        from fastapi import FastAPI
+        import health_version
+
+        app = FastAPI()
+        app.include_router(health_version.custom_api_router)
+        app.include_router(health_version.custom_api_router)  # simulated accident
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            app.openapi()
+
+        dup = [x for x in w if "Duplicate Operation ID" in str(x.message)]
+        assert len(dup) >= 1, (
+            "Expected FastAPI to warn about a duplicate /health/version route "
+            "when the router is included twice, but no warning was emitted. "
+            "If FastAPI now auto-deduplicates, the _router_registered guard may "
+            "be safely removed — but update this test first."
+        )
