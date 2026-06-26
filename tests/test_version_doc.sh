@@ -27,8 +27,8 @@ if [ ! -f "$DOC" ]; then
     exit 1
 fi
 
-# Extract §7 (Verify) section — from "## 7. Verify" to the next "## " heading
-verify_section=$(sed -n '/^## 7\. Verify/,/^## /p' "$DOC" | sed '$d')
+# Extract §7 (Verify) section — from "## 7. Verify" to the next numbered "## N." heading
+verify_section=$(sed -n '/^## 7\. Verify/,/^## [0-9][0-9]*\./p' "$DOC" | sed '$d')
 
 if [ -z "$verify_section" ]; then
     echo "ERROR: Could not find §7 (Verify) section in $DOC"

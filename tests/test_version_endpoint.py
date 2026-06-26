@@ -9,13 +9,9 @@ Covers:
 
 from __future__ import annotations
 
-import json
 import os
-import subprocess
 import sys
 from unittest.mock import patch, MagicMock
-
-import pytest
 
 sys.path.insert(0, ".")
 from version_endpoint import get_version_info, mount_version_endpoint

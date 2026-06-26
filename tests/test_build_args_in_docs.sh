@@ -80,8 +80,8 @@ fi
 
 # ── Test 5: Redeploy section (§8 build-on-box) has the args ────────────────
 echo "Test 5: Redeploy section (build-on-box) docker build has both args"
-# Extract lines between "Redeploy after a repo update" and the next ### heading
-redeploy_section=$(sed -n '/### Redeploy after a repo update/,/^### /p' "$DOC" | sed '$d')
+# Extract lines between "Redeploy after a repo update" and the next numbered ### heading
+redeploy_section=$(sed -n '/### Redeploy after a repo update/,/^## [0-9]/p' "$DOC" | sed '$d')
 redeploy_build=$(echo "$redeploy_section" | sed ':a;/\\$/N;s/\\\n//;ta' | grep 'docker build' || true)
 
 if [ -z "$redeploy_build" ]; then

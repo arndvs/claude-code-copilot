@@ -217,8 +217,10 @@ run_docker_checks() {
     # ── Check 7: Docker build without args → sha=unknown, built_at=unknown ──
     echo "Check 7: Docker build without --build-arg → sha='unknown', built_at='unknown'"
     if docker build -t "$DOCKER_IMAGE_DEFAULT" . >/dev/null 2>&1; then
-        # Run container on a random free port
-        local test_port=4099
+        # Allocate a free ephemeral port so the test does not conflict with
+        # any running service.
+        local test_port
+        test_port=$(python3 -c "import socket; s=socket.socket(); s.bind(('',0)); print(s.getsockname()[1]); s.close()")
         docker run -d --name "$DOCKER_CONTAINER" \
             -e "LITELLM_MASTER_KEY=sk-test-qa-key" \
             -p "127.0.0.1:${test_port}:4000" \
@@ -257,7 +259,8 @@ run_docker_checks() {
         --build-arg "BUILD_TIMESTAMP=$test_ts" \
         -t "$DOCKER_IMAGE_CUSTOM" . >/dev/null 2>&1; then
 
-        local test_port=4098
+        local test_port
+        test_port=$(python3 -c "import socket; s=socket.socket(); s.bind(('',0)); print(s.getsockname()[1]); s.close()")
         docker run -d --name "$DOCKER_CONTAINER" \
             -e "LITELLM_MASTER_KEY=sk-test-qa-key" \
             -p "127.0.0.1:${test_port}:4000" \
