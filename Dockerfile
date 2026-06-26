@@ -12,8 +12,15 @@ WORKDIR /app
 
 COPY litellm_config.yaml .
 COPY litellm_logger.py .
+COPY health_version.py .
 
 EXPOSE 4000
+
+# Build-time version info baked into the image (set during docker build).
+ARG BUILD_SHA=unknown
+ARG BUILD_TIMESTAMP=unknown
+ENV BUILD_SHA=${BUILD_SHA}
+ENV BUILD_TIMESTAMP=${BUILD_TIMESTAMP}
 
 # /app on the import path so litellm can load the litellm_logger callback module.
 ENV PYTHONPATH=/app
