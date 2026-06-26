@@ -118,3 +118,111 @@ class TestRegisterRouter:
 
         # Calling it again should also be safe
         health_version._register_router()
+
+
+class TestGitFallback:
+    """Unit tests for the git rev-parse fallback path in get_version()."""
+
+    def test_sha_falls_back_to_git_when_env_unset(self, monkeypatch):
+        """When BUILD_SHA is missing, git provides the SHA."""
+        monkeypatch.delenv("BUILD_SHA", raising=False)
+        from health_version import get_version
+
+        with patch("health_version.subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 0
+            mock_run.return_value.stdout = "deadbee\n"
+            result = get_version()
+
+        assert result["sha"] == "deadbee"
+        mock_run.assert_called_once()
+
+    def test_sha_falls_back_to_git_when_env_is_unknown(self, monkeypatch):
+        """'unknown' (the Dockerfile default) triggers the git fallback."""
+        monkeypatch.setenv("BUILD_SHA", "unknown")
+        from health_version import get_version
+
+        with patch("health_version.subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 0
+            mock_run.return_value.stdout = "face123\n"
+            result = get_version()
+
+        assert result["sha"] == "face123"
+
+    def test_sha_unknown_when_git_fails(self, monkeypatch):
+        """If git raises, sha falls back to 'unknown' — never propagates the exception."""
+        monkeypatch.delenv("BUILD_SHA", raising=False)
+        from health_version import get_version
+
+        with patch("health_version.subprocess.run", side_effect=Exception("git not found")):
+            result = get_version()
+
+        assert result["sha"] == "unknown"
+
+    def test_sha_unknown_when_git_returns_nonzero(self, monkeypatch):
+        """Non-zero git exit code is treated the same as a failure."""
+        monkeypatch.delenv("BUILD_SHA", raising=False)
+        from health_version import get_version
+
+        with patch("health_version.subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 128
+            mock_run.return_value.stdout = ""
+            result = get_version()
+
+        assert result["sha"] == "unknown"
+
+    def test_git_not_called_when_build_sha_is_set(self, monkeypatch):
+        """git is never invoked when BUILD_SHA is already baked in."""
+        monkeypatch.setenv("BUILD_SHA", "abc1234")
+        from health_version import get_version
+
+        with patch("health_version.subprocess.run") as mock_run:
+            get_version()
+
+        mock_run.assert_not_called()
+
+
+class TestBuiltAtEdgeCases:
+    """Edge cases for the built_at field."""
+
+    def test_built_at_unknown_when_env_is_literal_unknown(self, monkeypatch):
+        """The Dockerfile default 'unknown' for BUILD_TIMESTAMP stays as 'unknown'."""
+        monkeypatch.setenv("BUILD_SHA", "abc1234")
+        monkeypatch.setenv("BUILD_TIMESTAMP", "unknown")
+        from health_version import get_version
+
+        result = get_version()
+        assert result["built_at"] == "unknown"
+
+    def test_built_at_unknown_when_env_unset(self, monkeypatch):
+        """BUILD_TIMESTAMP not set at all → 'unknown'."""
+        monkeypatch.setenv("BUILD_SHA", "abc1234")
+        monkeypatch.delenv("BUILD_TIMESTAMP", raising=False)
+        from health_version import get_version
+
+        result = get_version()
+        assert result["built_at"] == "unknown"
+
+
+class TestSingleRouteRegistration:
+    """Regression guard: exactly one /health/version GET route must be registered.
+
+    This test exists to catch any future attempt to register the route via a
+    second mechanism (e.g. re-introducing LITELLM_WORKER_STARTUP_HOOKS or a
+    second module).  If this test fails, a route collision has been introduced.
+    """
+
+    def test_custom_api_router_has_exactly_one_route(self):
+        import health_version
+
+        routes = health_version.custom_api_router.routes
+        assert len(routes) == 1, (
+            f"Expected exactly 1 route on custom_api_router, found {len(routes)}: "
+            f"{[r.path for r in routes]}"
+        )
+
+    def test_single_route_is_health_version_get(self):
+        import health_version
+
+        route = health_version.custom_api_router.routes[0]
+        assert route.path == "/health/version"
+        assert "GET" in route.methods
