@@ -718,7 +718,7 @@ class TestEmitDefensiveNoCrash(unittest.TestCase):
 # ===================================================================
 
 
-class TestEmitStreamField:
+class TestEmitStreamField(unittest.TestCase):
     """Verify _emit includes stream indicator from kwargs."""
 
     def test_emit_stream_true_when_stream_in_kwargs(self):
@@ -759,7 +759,7 @@ class TestEmitStreamField:
 # ===================================================================
 
 
-class TestStreamingCallbacks:
+class TestStreamingCallbacks(unittest.TestCase):
     """Verify logger handles streaming success/failure callbacks."""
 
     def _capture_logger_call(self, method_name, kwargs, response_obj=None):
