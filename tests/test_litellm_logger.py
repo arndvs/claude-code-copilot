@@ -513,7 +513,8 @@ def _capture_emit(kwargs, response_obj=None, status="success"):
         sys.stdout = old_stdout
 
     line = buf.getvalue().strip()
-    assert line.startswith("PROXY_LOG "), f"Expected PROXY_LOG prefix, got: {line!r}"
+    if not line.startswith("PROXY_LOG "):
+        raise AssertionError(f"Expected PROXY_LOG prefix, got: {line!r}")
     return json.loads(line[len("PROXY_LOG "):])
 
 
