@@ -24,7 +24,7 @@ Every model entry carries four required editor headers that Copilot validates:
 
 **Auth boundary.** `general_settings.master_key` reads from `LITELLM_MASTER_KEY` env var. Claude Code authenticates to LiteLLM with this key; LiteLLM authenticates to Copilot with the OAuth token cached at `~/.config/litellm/github_copilot/`. The two credentials never cross.
 
-**Global settings.** `drop_params: true` and `additional_drop_params: ["response_format", "thinking"]` silently strip parameters Copilot doesn't support. `stream: false` on every route because Copilot's streaming support is unreliable.
+**Proxy settings.** `drop_params: true` and `additional_drop_params: ["response_format", "thinking"]` are global `litellm_settings` that silently strip parameters Copilot doesn't support. `stream: true` is set in `litellm_params` on every route to reduce empty-content 200s from the Anthropic adapter — streaming delivers chunks incrementally and avoids the adapter race where a non-streamed response can return empty content.
 
 ## 2. DB-less default mode
 
@@ -55,11 +55,14 @@ docker compose -f docker-compose.yml -f docker-compose.db.yml up --build
 |---|---|
 | `model` | Requested model name |
 | `call_type` | LiteLLM call type |
+| `stream` | Whether the request used streaming (`true`, `false`, or `null` if unknown) |
 | `ms` | Latency in milliseconds |
 | `finish` | Upstream `finish_reason` / `stop_reason` |
 | `content_len` | Text content length (0 = empty, −1 = non-string) |
 | `completion_tokens` | Token count from usage |
 | `upstream_empty` | `true` when status=success and (content_len=0 or completion_tokens=0) |
+| `http_status` | HTTP status code from upstream (int or null) |
+| `ratelimit` | Dict of `x-ratelimit-*` headers (prefix-stripped); **omitted** when none present |
 | `status` | `success` or `failure` |
 
 **Design rules:**
@@ -81,3 +84,26 @@ Three workflows under `.github/workflows/`:
 **Proxy-canary detail.** Retries up to 5 times with 6 s sleep between attempts. Distinguishes hard errors (401/403/400/5xx/unreachable) from the Copilot empty-content quirk. On persistent empty content the job sets `status=degraded` and emits a GitHub Actions warning — the proxy is verified as up and authenticating, so it does not page.
 
 **Model-health detail.** Parses `litellm_config.yaml` with PyYAML to extract all non-wildcard aliases. Each alias is probed with 5 retries (4 s apart). Failing aliases are collected and reported in a `model-health` labeled issue. Guards against false greens: if YAML parsing yields zero aliases, the job fails immediately.
+
+## 5. Version endpoint — `/health/version`
+
+Single canonical module: **`health_version.py`**. Registered as a LiteLLM callback via `litellm_config.yaml`; at import time it attaches a `custom_api_router` to the proxy's FastAPI app.
+
+**Environment variables:**
+
+| Variable | Source | Behaviour |
+|---|---|---|
+| `BUILD_SHA` | `docker build --build-arg BUILD_SHA=$(git rev-parse --short HEAD)` | 7-char SHA; trimmed if longer |
+| `BUILD_TIMESTAMP` | `docker build --build-arg BUILD_TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)` | ISO 8601 UTC string |
+
+**Fallback for local dev.** When `BUILD_SHA` is unset or `"unknown"` (i.e. `make start` without `--build-arg`), the module calls `git rev-parse --short HEAD` so local dev always returns the real working-tree SHA instead of the literal string `"unknown"`.
+
+**Response shape** (no auth required, same as `/health/readiness`):
+
+```json
+{"sha": "abc1234", "built_at": "2024-06-01T12:00:00Z"}
+```
+
+**Design constraints:**
+- Only one module may register `/health/version`. `TestSingleRouteRegistration` in `tests/test_health_version.py` enforces this as a permanent regression guard.
+- `version_endpoint.py` was deleted (refs #67); `LITELLM_WORKER_STARTUP_HOOKS` is not used.

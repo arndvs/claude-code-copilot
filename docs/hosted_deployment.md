@@ -136,7 +136,10 @@ rm -rf ~/.config/litellm/github_copilot
 > **Mount the token read-write (**`:rw`**).** LiteLLM refreshes the Copilot token periodically and must write the new value back to `api-key.json`. A read-only (`:ro`) mount causes requests to start failing with a `Read-only file system … api-key.json` error once the token needs refreshing.
 
 ```bash
-docker build -t claude-code-copilot-proxy:latest .
+docker build \
+  --build-arg BUILD_SHA=$(git rev-parse --short HEAD) \
+  --build-arg BUILD_TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+  -t claude-code-copilot-proxy:latest .
 
 docker run -d --name proxy --restart unless-stopped \
   --env-file .env \
@@ -148,6 +151,7 @@ docker run -d --name proxy --restart unless-stopped \
 
 Notes:
 
+- The `--build-arg` flags bake the git commit SHA and build timestamp into the image, exposed via `/health/version`.
 - `-p 127.0.0.1:4000:4000` binds to **localhost only** — the proxy is never directly internet-reachable. Verify with `ss -tlnp | grep 4000` (expect `127.0.0.1:4000`, not `0.0.0.0:4000`).
 - `--restart unless-stopped` brings the container back automatically after a reboot or crash.
 - **Changing env vars (e.g. rotating the key) requires** `docker rm -f` **+ a fresh** `docker run`**, not** `docker restart` — a restart reuses the original environment and will keep serving the old key. See §7.
@@ -198,11 +202,37 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST https://proxy.example.com/v1/me
 # C) raw proxy port from outside → connection refused / timeout (never exposed)
 curl -s -o /dev/null -w "%{http_code}\n" --max-time 8 http://proxy.example.com:4000/v1/messages
 
+# D) version endpoint — confirm which commit is running (no auth required)
+curl -s https://proxy.example.com/health/version
+# expect {"sha":"<7-char>","built_at":"<ISO 8601 timestamp>"}
+
 ```
 
-Expected: (A) a completion, (B) `401`, (C) a timeout/`000`.
+Expected: (A) a completion, (B) `401`, (C) a timeout/`000`, (D) JSON with `sha` and `built_at`.
 
 **Reboot-survival test:** reboot the instance, wait a few minutes, and re-run check (A) from your external machine. If it returns a completion with no manual intervention, the auto-restart chain (Docker → both containers → persisted cert → persisted token) is sound.
+
+### Confirm deployed version
+
+After a redeploy, confirm which code is running without SSH/SSM access:
+
+```bash
+# D) check deployed version — no auth required
+curl -s https://proxy.example.com/health/version
+```
+
+Expected output:
+
+```json
+{"sha": "abc1234", "built_at": "2024-06-01T12:00:00Z"}
+```
+
+- `sha` — the 7-character git commit baked in at `docker build` time (via `--build-arg BUILD_SHA`).
+- `built_at` — ISO 8601 UTC timestamp of the build (via `--build-arg BUILD_TIMESTAMP`).
+
+> **This replaces the need to SSH/SSM into the instance and run `git log` to check
+> which version is deployed.** After any redeploy (§8), hit `/health/version` from
+> your workstation to confirm the new SHA matches the commit you pushed.
 
 ---
 
@@ -240,7 +270,10 @@ build, no dependency drift, instant rollback.
 ```bash
 cd /opt/claude-code-copilot
 git fetch origin && git reset --hard origin/main   # or your deploy branch
-docker build -t claude-code-copilot-proxy:latest .
+docker build \
+  --build-arg BUILD_SHA="$(git rev-parse --short HEAD)" \
+  --build-arg BUILD_TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  -t claude-code-copilot-proxy:latest .
 docker rm -f proxy 2>/dev/null || true
 docker run -d --name proxy --restart unless-stopped \
   --env-file .env \
@@ -287,7 +320,10 @@ SHA=$(git rev-parse --short HEAD)
 aws ecr get-login-password --region $REGION | \
   docker login --username AWS --password-stdin $ACCOUNT.dkr.ecr.$REGION.amazonaws.com
 
-docker build -t claude-code-copilot-proxy:$SHA .
+docker build \
+  --build-arg BUILD_SHA="$SHA" \
+  --build-arg BUILD_TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  -t claude-code-copilot-proxy:$SHA .
 # Tag with the commit SHA (immutable — enables rollback) AND a moving latest:
 docker tag claude-code-copilot-proxy:$SHA $ECR_URI:$SHA
 docker tag claude-code-copilot-proxy:$SHA $ECR_URI:latest
@@ -331,6 +367,7 @@ docker run -d --name proxy --restart unless-stopped \
 
 ```bash
 curl -s http://localhost:4000/health/readiness          # expect 200
+curl -s http://localhost:4000/health/version            # expect {"sha":"<7-char>","built_at":"<ISO>"}
 # then run check (A) from §7 with a valid key, from an external machine
 ```
 
