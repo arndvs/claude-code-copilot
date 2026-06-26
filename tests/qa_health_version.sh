@@ -113,7 +113,7 @@ run_local_checks() {
         fail "GET /health/version returned empty response or non-200"
     else
         # Validate JSON structure
-        local sha built_at
+        local sha="" built_at=""
         sha=$(echo "$response" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['sha'])" 2>/dev/null || echo "")
         built_at=$(echo "$response" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['built_at'])" 2>/dev/null || echo "")
 
@@ -228,7 +228,7 @@ run_docker_checks() {
             local response
             response=$(curl -sf "http://localhost:${test_port}/health/version" 2>/dev/null || echo "")
             if [ -n "$response" ]; then
-                local sha built_at
+                local sha="" built_at=""
                 sha=$(echo "$response" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['sha'])" 2>/dev/null || echo "")
                 built_at=$(echo "$response" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['built_at'])" 2>/dev/null || echo "")
 
@@ -267,7 +267,7 @@ run_docker_checks() {
             local response
             response=$(curl -sf "http://localhost:${test_port}/health/version" 2>/dev/null || echo "")
             if [ -n "$response" ]; then
-                local sha built_at
+                local sha="" built_at=""
                 sha=$(echo "$response" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['sha'])" 2>/dev/null || echo "")
                 built_at=$(echo "$response" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['built_at'])" 2>/dev/null || echo "")
 
