@@ -23,7 +23,10 @@ jobs:
           python-version: '3.12'
 
       - name: Install PyYAML
-        run: pip install pyyaml
+        run: pip install pyyaml pytest
+
+      - name: Run Python unit tests
+        run: pytest tests/ -q --tb=short
 
       - name: Validate litellm_config.yaml parses
         run: |

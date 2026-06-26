@@ -24,7 +24,7 @@ Every model entry carries four required editor headers that Copilot validates:
 
 **Auth boundary.** `general_settings.master_key` reads from `LITELLM_MASTER_KEY` env var. Claude Code authenticates to LiteLLM with this key; LiteLLM authenticates to Copilot with the OAuth token cached at `~/.config/litellm/github_copilot/`. The two credentials never cross.
 
-**Global settings.** `drop_params: true` and `additional_drop_params: ["response_format", "thinking"]` silently strip parameters Copilot doesn't support. `stream: true` on every route to reduce empty-content 200s from the Anthropic adapter — streaming delivers chunks incrementally and avoids the adapter race where a non-streamed response can return empty content.
+**Per-route settings.** `drop_params: true` and `additional_drop_params: ["response_format", "thinking"]` silently strip parameters Copilot doesn't support. `stream: true` on every route to reduce empty-content 200s from the Anthropic adapter — streaming delivers chunks incrementally and avoids the adapter race where a non-streamed response can return empty content.
 
 ## 2. DB-less default mode
 

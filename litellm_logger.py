@@ -211,7 +211,10 @@ class ProxyObservabilityLogger(CustomLogger):
         _emit(kwargs, response_obj, start_time, end_time, "failure")
 
     def log_stream_event(self, kwargs, response_obj, start_time, end_time, **extra_kwargs):
-        _emit(kwargs, response_obj, start_time, end_time, "success")
+        # Streaming fires this hook per chunk; the final aggregated completion
+        # is handled by log_success_event after all chunks are received.
+        # Logging per-chunk would be very noisy and log incomplete content_len.
+        pass
 
     async def async_log_success_event(self, kwargs, response_obj, start_time, end_time, **extra_kwargs):
         _emit(kwargs, response_obj, start_time, end_time, "success")
@@ -220,7 +223,8 @@ class ProxyObservabilityLogger(CustomLogger):
         _emit(kwargs, response_obj, start_time, end_time, "failure")
 
     async def async_log_stream_event(self, kwargs, response_obj, start_time, end_time, **extra_kwargs):
-        _emit(kwargs, response_obj, start_time, end_time, "success")
+        # Same as log_stream_event: skip per-chunk logging.
+        pass
 
 
 proxy_handler_instance = ProxyObservabilityLogger()
