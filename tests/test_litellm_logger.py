@@ -11,7 +11,6 @@ import json
 import sys
 from datetime import datetime
 from io import StringIO
-from types import SimpleNamespace
 
 import pytest
 

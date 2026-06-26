@@ -21,9 +21,20 @@ CONFIG_PATH = REPO_ROOT / "litellm_config.yaml"
 
 @pytest.fixture
 def config():
-    """Load and return the parsed litellm_config.yaml."""
+    """Load and return the parsed litellm_config.yaml.
+
+    Skips dependent tests gracefully when the file is absent, and fails
+    clearly when the YAML is empty or not a mapping.
+    """
+    if not CONFIG_PATH.exists():
+        pytest.skip(f"litellm_config.yaml not found at {CONFIG_PATH}")
     with open(CONFIG_PATH) as f:
-        return yaml.safe_load(f)
+        data = yaml.safe_load(f)
+    if not isinstance(data, dict):
+        pytest.fail(
+            f"litellm_config.yaml did not parse as a mapping (got {type(data).__name__})"
+        )
+    return data
 
 
 class TestStreamingEnabled:
