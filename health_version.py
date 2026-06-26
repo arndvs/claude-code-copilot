@@ -14,11 +14,16 @@ imports this module at startup (which triggers ``_register_router``).
 Environment variables (set as Docker build ARGs → ENV):
   BUILD_SHA        — 7-char git commit SHA (default: "unknown")
   BUILD_TIMESTAMP  — ISO 8601 build time (default: "unknown")
+
+When BUILD_SHA is unset or "unknown" (e.g. local ``make start``), the module
+falls back to ``git rev-parse --short HEAD`` so local dev always returns a
+meaningful SHA rather than the literal string "unknown".
 """
 
 from __future__ import annotations
 
 import os
+import subprocess
 
 from fastapi import APIRouter
 
@@ -31,12 +36,36 @@ except Exception:  # pragma: no cover
 
 custom_api_router = APIRouter()
 
+# Directory of this file — used as cwd for git fallback so it works regardless
+# of the process working directory.
+_MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _git_sha_fallback() -> str:
+    """Try ``git rev-parse --short HEAD``; return 'unknown' on any failure."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            cwd=_MODULE_DIR,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return "unknown"
+
 
 def get_version() -> dict:
-    """Return version info from build-time environment variables."""
-    sha = os.environ.get("BUILD_SHA", "unknown")
+    """Return version info from build-time env vars, with a git fallback."""
+    sha = os.environ.get("BUILD_SHA", "").strip()
+    # Fall back to live git when env is missing or is the Dockerfile default.
+    if not sha or sha == "unknown":
+        sha = _git_sha_fallback()
     # Spec requires a 7-char short SHA; trim if a full SHA was baked in.
-    if sha != "unknown" and len(sha) > 7:
+    elif len(sha) > 7:
         sha = sha[:7]
     return {
         "sha": sha,

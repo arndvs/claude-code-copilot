@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import os
+from unittest.mock import patch
 
 import pytest
 
@@ -38,12 +39,14 @@ class TestGetVersion:
         result = get_version()
         assert result["built_at"] == "2024-01-15T10:30:00Z"
 
-    def test_sha_defaults_to_unknown_when_unset(self, monkeypatch):
+    def test_sha_defaults_to_unknown_when_env_and_git_both_fail(self, monkeypatch):
+        """'unknown' is returned only when both env and git are unavailable."""
         monkeypatch.delenv("BUILD_SHA", raising=False)
         monkeypatch.delenv("BUILD_TIMESTAMP", raising=False)
         from health_version import get_version
 
-        result = get_version()
+        with patch("health_version.subprocess.run", side_effect=Exception("git not found")):
+            result = get_version()
         assert result["sha"] == "unknown"
 
     def test_built_at_defaults_to_unknown_when_unset(self, monkeypatch):
