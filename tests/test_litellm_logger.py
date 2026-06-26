@@ -7,7 +7,7 @@ Covers:
 - _extract_http_info: status code, ratelimit headers, defensive behavior
 - _emit: integration test verifying JSON structure, field presence, no content leak
 
-Uses only stdlib (unittest + unittest.mock). No external test dependencies.
+Uses only stdlib (unittest). No external test dependencies.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import sys
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime
 from io import StringIO
 from types import SimpleNamespace
 
