@@ -84,3 +84,26 @@ Three workflows under `.github/workflows/`:
 **Proxy-canary detail.** Retries up to 5 times with 6 s sleep between attempts. Distinguishes hard errors (401/403/400/5xx/unreachable) from the Copilot empty-content quirk. On persistent empty content the job sets `status=degraded` and emits a GitHub Actions warning — the proxy is verified as up and authenticating, so it does not page.
 
 **Model-health detail.** Parses `litellm_config.yaml` with PyYAML to extract all non-wildcard aliases. Each alias is probed with 5 retries (4 s apart). Failing aliases are collected and reported in a `model-health` labeled issue. Guards against false greens: if YAML parsing yields zero aliases, the job fails immediately.
+
+## 5. Version endpoint — `/health/version`
+
+Single canonical module: **`health_version.py`**. Registered as a LiteLLM callback via `litellm_config.yaml`; at import time it attaches a `custom_api_router` to the proxy's FastAPI app.
+
+**Environment variables:**
+
+| Variable | Source | Behaviour |
+|---|---|---|
+| `BUILD_SHA` | `docker build --build-arg BUILD_SHA=$(git rev-parse --short HEAD)` | 7-char SHA; trimmed if longer |
+| `BUILD_TIMESTAMP` | `docker build --build-arg BUILD_TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)` | ISO 8601 UTC string |
+
+**Fallback for local dev.** When `BUILD_SHA` is unset or `"unknown"` (i.e. `make start` without `--build-arg`), the module calls `git rev-parse --short HEAD` so local dev always returns the real working-tree SHA instead of the literal string `"unknown"`.
+
+**Response shape** (no auth required, same as `/health/readiness`):
+
+```json
+{"sha": "abc1234", "built_at": "2024-06-01T12:00:00Z"}
+```
+
+**Design constraints:**
+- Only one module may register `/health/version`. `TestSingleRouteRegistration` in `tests/test_health_version.py` enforces this as a permanent regression guard.
+- `version_endpoint.py` was deleted (refs #67); `LITELLM_WORKER_STARTUP_HOOKS` is not used.
