@@ -78,8 +78,10 @@ export async function runImplementPr(opts: { prNumber: string; repoDir: string; 
     // Keep a non-empty review body when there are inline comments but no top-level
     // comments, so the GitHub UI never shows a review with a blank summary.
     const topLevelBody = result.output.topLevelComments.map((c) => c.body).join("\n\n");
-    const reviewBody =
-      topLevelBody || (result.output.newInlineComments.length > 0 ? "Addressed review feedback." : undefined);
+    // Only pass an explicit caller-supplied body; let postReview() add a fallback
+    // based on the post-validation inline comment count so placeholder reviews are
+    // never posted when all inline comments are dropped as invalid.
+    const reviewBody = topLevelBody || undefined;
 
     const reviewResult = postReview({
       prNumber,
