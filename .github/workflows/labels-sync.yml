@@ -1,0 +1,51 @@
+name: "Labels: Sync"
+
+# Reconcile GitHub labels from the vendored .sandcastle/labels.json so a missing or
+# drifted label can't strand issues in agent:blocked. Runs when the label set changes
+# on the default branch, on a weekly cron, and on demand. Idempotent (create-or-update).
+
+on:
+  push:
+    branches: ["dev"]
+    paths:
+      - ".sandcastle/labels.json"
+  schedule:
+    - cron: "23 9 * * 1" # Mondays 09:23 UTC — weekly reconcile
+  workflow_dispatch:
+
+jobs:
+  sync-labels:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Reconcile labels from .sandcastle/labels.json
+        run: |
+          set -euo pipefail
+          labels_file=".sandcastle/labels.json"
+          if [ ! -f "$labels_file" ]; then
+            echo "No $labels_file — nothing to sync."
+            exit 0
+          fi
+          jq -c '.[]' "$labels_file" | while read -r row; do
+            name=$(jq -r '.name' <<<"$row")
+            color=$(jq -r '.color' <<<"$row")
+            desc=$(jq -r '.description' <<<"$row")
+            if gh label create "$name" --color "$color" --description "$desc" >/dev/null 2>&1; then
+              echo "created: $name"
+            elif gh label edit "$name" --color "$color" --description "$desc" >/dev/null 2>&1; then
+              echo "synced:  $name"
+            else
+              echo "skip:    $name (create and edit both failed)"
+            fi
+          done

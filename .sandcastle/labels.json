@@ -1,0 +1,14 @@
+[
+  { "name": "Sandcastle", "color": "7057ff", "description": "Entry point — triggers agent review pipeline" },
+  { "name": "agent:review", "color": "0075ca", "description": "Agent is reviewing the issue" },
+  { "name": "agent:implement", "color": "e4e669", "description": "Agent is implementing the issue" },
+  { "name": "agent:pr-open", "color": "1d76db", "description": "Agent has opened a PR for review" },
+  { "name": "agent:merge", "color": "0e8a16", "description": "Agent should merge the PR" },
+  { "name": "agent:fix", "color": "d93f0b", "description": "Agent should fix PR review feedback" },
+  { "name": "agent:blocked", "color": "b60205", "description": "Agent is blocked and needs human input" },
+  { "name": "agent:queued", "color": "c5def5", "description": "Agent waiting for blocking issues to close before implementing" },
+  { "name": "agent:in-progress", "color": "fbca04", "description": "Agent is actively working on this issue" },
+  { "name": "agent:update-branch", "color": "5319e7", "description": "Agent should update branch against base ref" },
+  { "name": "agent:implement-prd", "color": "d4c5f9", "description": "Agent should implement next sub-issue of a PRD" },
+  { "name": "source:architecture-review", "color": "5319e7", "description": "PRDs proposed by the automated architecture-review workflow" }
+]

@@ -44,19 +44,18 @@ export function postReview(opts: PostReviewOpts): PostReviewResult {
     return { postedInlineComments: 0, postedReplies: 0, droppedComments: 0, droppedReplies: 0 };
   }
 
-  const headSha = execFileSync("gh", ["pr", "view", prNumber, "--json", "headRefOid", "--jq", ".headRefOid"], {
-    encoding: "utf8",
-    cwd,
-    stdio: ["ignore", "pipe", "pipe"],
-  }).trim();
-
-  const diffOutput = (() => {
-    try {
-      return execFileSync("gh", ["pr", "diff", prNumber], { encoding: "utf8", cwd, stdio: ["ignore", "pipe", "pipe"] });
-    } catch {
-      return "";
-    }
-  })();
+  // Only fetch + parse the PR diff when there are inline comments to validate against it.
+  // Reply-only runs skip the gh pr diff round-trip entirely.
+  const diffOutput =
+    inlineComments.length > 0
+      ? (() => {
+          try {
+            return execFileSync("gh", ["pr", "diff", prNumber], { encoding: "utf8", cwd, stdio: ["ignore", "pipe", "pipe"] });
+          } catch {
+            return "";
+          }
+        })()
+      : "";
   const diffLines = parseDiffLineAnchors(diffOutput);
 
   const validInlineComments = inlineComments.filter((c) => {
@@ -85,13 +84,24 @@ export function postReview(opts: PostReviewOpts): PostReviewResult {
   const droppedComments = inlineComments.length - validInlineComments.length;
   const droppedReplies = threadReplies.length - validReplies.length;
 
-  if (skipEmptyReview && validInlineComments.length === 0 && !opts.reviewBody) {
+  // Compute the review body after validation so the fallback only appears when
+  // at least one inline comment survived — avoids posting a placeholder-only review.
+  const effectiveReviewBody =
+    opts.reviewBody ?? (validInlineComments.length > 0 ? "Addressed review feedback." : undefined);
+
+  if (skipEmptyReview && validInlineComments.length === 0 && !effectiveReviewBody) {
     // No review to post — just do thread replies
   } else {
+    // Fetch the head SHA only now that we know a review will actually be posted.
+    const headSha = execFileSync("gh", ["pr", "view", prNumber, "--json", "headRefOid", "--jq", ".headRefOid"], {
+      encoding: "utf8",
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
     const reviewPayload = JSON.stringify({
       commit_id: headSha,
       event: "COMMENT",
-      body: opts.reviewBody ?? "",
+      body: effectiveReviewBody ?? "",
       comments: validInlineComments.map((c) => ({ path: c.path, line: c.line, side: c.side, body: c.body })),
     });
 
