@@ -51,7 +51,15 @@ export function postReview(opts: PostReviewOpts): PostReviewResult {
       ? (() => {
           try {
             return execFileSync("gh", ["pr", "diff", prNumber], { encoding: "utf8", cwd, stdio: ["ignore", "pipe", "pipe"] });
-          } catch {
+          } catch (err) {
+            // Surface the underlying gh failure (stderr/message) so auth/repo/network issues are
+            // actionable instead of silently swallowed.
+            const e = err as { stderr?: unknown };
+            const stderr = typeof e.stderr === "string" ? e.stderr.trim() : "";
+            const detail = stderr || (err instanceof Error ? err.message : String(err));
+            console.warn(
+              `${prefix} Failed to fetch PR diff — all inline comments will be dropped as "file not in diff". Check gh auth / PR state.${detail ? ` Details: ${detail}` : ""}`,
+            );
             return "";
           }
         })()
