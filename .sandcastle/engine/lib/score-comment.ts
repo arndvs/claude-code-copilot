@@ -22,9 +22,9 @@ const VAGUE_PATTERNS = [
 
 // Forced-confirm keywords — floor the tier at "confirm" even when the arithmetic
 // yields "auto", because these signal a behavior/contract change that needs explicit
-// human approval. score-comment.test.ts pins this regex set, so any edit here fails the test until
-// the pin is updated; keep the review-pr-copilot skill's Forced-Confirm prose list in sync by hand
-// (the test guards the code set, not the prose).
+// human approval. These patterns are stable policy: when you change them, update the matching
+// pin in the source repo's score-comment tests and the review-pr-copilot skill's Forced-Confirm
+// list so the prose and code stay aligned.
 export const FORCED_CONFIRM_PATTERNS = [
   /\brefactor\b/i,
   /\balign\b/i,
@@ -107,7 +107,7 @@ function collectSignals(comment: PrComment): Signal[] {
   // NOTE: the review-pr-copilot skill also lists a +15 "touched code has test coverage"
   // signal. It is intentionally absent here — CI scores from comment metadata only and has
   // no coverage data at scoring time, so that signal is local-only (human run). Keep this
-  // asymmetry documented in skills/review-pr-copilot/SKILL.md.
+  // asymmetry documented in the review-pr-copilot skill.
 
   // -25 vague language
   if (matchesAny(body, VAGUE_PATTERNS)) {

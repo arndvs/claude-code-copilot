@@ -6,7 +6,9 @@ name: "Labels: Sync"
 
 on:
   push:
-    branches: ["dev"]
+    # Default branch + main: labels.json lands on the default branch via PR, then reaches main on
+    # promotion; reconcile on both (a duplicate entry when the default already IS main is harmless).
+    branches: ["dev", "main"]
     paths:
       - ".sandcastle/labels.json"
   schedule:
@@ -37,7 +39,17 @@ jobs:
             echo "No $labels_file — nothing to sync."
             exit 0
           fi
-          jq -c '.[]' "$labels_file" | while read -r row; do
+          # Capture the label rows up front so invalid JSON fails the step explicitly. Process
+          # substitution (`done < <(jq ...)`) would mask a jq parse error under `set -euo pipefail`:
+          # the loop would read zero rows and the step would still succeed. Iterating a here-string
+          # keeps `failed` in this shell (no subshell), so a failed reconcile still fails the run.
+          rows="$(jq -c '.[]' "$labels_file")" || {
+            echo "Invalid JSON in $labels_file — aborting." >&2
+            exit 1
+          }
+          failed=0
+          while read -r row; do
+            [ -n "$row" ] || continue
             name=$(jq -r '.name' <<<"$row")
             color=$(jq -r '.color' <<<"$row")
             desc=$(jq -r '.description' <<<"$row")
@@ -46,6 +58,11 @@ jobs:
             elif gh label edit "$name" --color "$color" --description "$desc" >/dev/null 2>&1; then
               echo "synced:  $name"
             else
-              echo "skip:    $name (create and edit both failed)"
+              echo "FAILED:  $name (create and edit both failed)"
+              failed=1
             fi
-          done
+          done <<<"$rows"
+          if [ "$failed" -ne 0 ]; then
+            echo "One or more labels could not be reconciled." >&2
+            exit 1
+          fi
