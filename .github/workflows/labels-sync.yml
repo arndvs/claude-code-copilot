@@ -50,9 +50,9 @@ jobs:
           failed=0
           while read -r row; do
             [ -n "$row" ] || continue
-            name=$(jq -r '.name' <<<"$row")
-            color=$(jq -r '.color' <<<"$row")
-            desc=$(jq -r '.description' <<<"$row")
+            name=$(jq -er '.name' <<<"$row")
+            color=$(jq -er '.color' <<<"$row")
+            desc=$(jq -er '.description' <<<"$row")
             if gh label create "$name" --color "$color" --description "$desc" >/dev/null 2>&1; then
               echo "created: $name"
             elif gh label edit "$name" --color "$color" --description "$desc" >/dev/null 2>&1; then
