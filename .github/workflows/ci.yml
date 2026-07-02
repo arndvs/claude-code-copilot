@@ -18,6 +18,9 @@ jobs:
       - name: Security regression tests
         run: bash scripts/test_security.sh
 
+      - name: Completion-probe classification tests
+        run: bash tests/test_probe_completion.sh
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
