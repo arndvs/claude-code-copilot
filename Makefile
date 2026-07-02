@@ -145,7 +145,7 @@ claude-status:
 	if [ -f "$$SETTINGS_FILE" ]; then \
 		python3 scripts/claude_status_redact.py < "$$SETTINGS_FILE" 2>/dev/null || { echo '(could not parse settings)'; exit 0; }; \
 		echo ""; \
-		python3 scripts/proxy_status.py "$$SETTINGS_FILE"; \
+		python3 scripts/proxy_status.py "$$SETTINGS_FILE" "$(PORT)"; \
 	else \
 		echo "No settings file — using Claude Code defaults (Anthropic direct)"; \
 	fi

@@ -45,6 +45,12 @@ class TestResolveProxyUrl:
     def test_non_dict_settings_returns_none(self):
         assert proxy_status.resolve_proxy_url([]) is None
 
+    def test_non_string_value_is_coerced_not_crashed(self):
+        # A non-string ANTHROPIC_BASE_URL (malformed settings) must not raise; it
+        # is coerced so validate_proxy_url can reject it as invalid.
+        assert proxy_status.resolve_proxy_url({"env": {"ANTHROPIC_BASE_URL": 123}}) == "123"
+        assert proxy_status.resolve_proxy_url({"env": {"ANTHROPIC_BASE_URL": True}}) == "True"
+
 
 class TestValidateProxyUrl:
     @pytest.mark.parametrize(
@@ -156,3 +162,25 @@ class TestReadFallbackPort:
 
     def test_defaults_when_file_missing(self, tmp_path):
         assert proxy_status.read_fallback_port(str(tmp_path / "nope.env")) == proxy_status.DEFAULT_PORT
+
+    def test_custom_default_used_when_absent(self, tmp_path):
+        env = tmp_path / ".env"
+        env.write_text("OTHER=1\n")
+        assert proxy_status.read_fallback_port(str(env), default="7777") == "7777"
+
+
+class TestMain:
+    def test_passes_make_default_port_to_fallback(self, tmp_path, monkeypatch):
+        # `make claude-status PORT=XXXX` passes the port as argv[2]; main() must
+        # feed it to read_fallback_port as the default (.env still takes precedence).
+        settings = tmp_path / "settings.json"
+        settings.write_text('{"env": {"ANTHROPIC_BASE_URL": ""}}')
+        captured = {}
+
+        def fake_read(env_path=".env", default=proxy_status.DEFAULT_PORT):
+            captured["default"] = default
+            return default
+
+        monkeypatch.setattr(proxy_status, "read_fallback_port", fake_read)
+        proxy_status.main(["proxy_status.py", str(settings), "6543"])
+        assert captured["default"] == "6543"

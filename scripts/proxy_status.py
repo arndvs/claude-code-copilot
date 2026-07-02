@@ -40,8 +40,13 @@ def resolve_proxy_url(settings, fallback_port=DEFAULT_PORT):
     env = settings.get("env") if isinstance(settings, dict) else None
     if not isinstance(env, dict) or "ANTHROPIC_BASE_URL" not in env:
         return None
-    url = env.get("ANTHROPIC_BASE_URL") or f"http://localhost:{fallback_port}"
-    return url.rstrip("/")
+    raw = env.get("ANTHROPIC_BASE_URL")
+    if raw is None or raw == "":
+        # Present but empty -> fall back to the local proxy on the resolved port.
+        return f"http://localhost:{fallback_port}"
+    # Coerce non-string values (number/bool/list from malformed settings) so
+    # validate_proxy_url surfaces them as invalid instead of raising on .rstrip().
+    return str(raw).rstrip("/")
 
 
 def validate_proxy_url(url):
@@ -123,6 +128,9 @@ def main(argv=None):
     argv = list(sys.argv if argv is None else argv)
     if len(argv) < 2:
         return 0  # No settings file provided — nothing to report.
+    # Optional argv[2] = the Makefile's $(PORT) default, so `make claude-status
+    # PORT=XXXX` still controls the fallback when .env lacks LITELLM_PORT.
+    make_default_port = argv[2] if len(argv) > 2 and argv[2] else DEFAULT_PORT
     try:
         with open(argv[1]) as f:
             settings = json.load(f)
@@ -130,7 +138,7 @@ def main(argv=None):
         # The Makefile handles parse/read errors before calling us; stay silent
         # and successful rather than double-reporting.
         return 0
-    for line in render_status(settings, read_fallback_port()):
+    for line in render_status(settings, read_fallback_port(default=make_default_port)):
         print(line)
     return 0
 
