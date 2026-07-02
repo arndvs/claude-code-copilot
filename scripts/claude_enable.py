@@ -14,7 +14,8 @@ import os
 import sys
 import tempfile
 from pathlib import Path
-from urllib.parse import urlparse
+
+from proxy_status import classify_proxy, validate_proxy_url
 
 
 def resolve_settings_file():
@@ -28,14 +29,8 @@ def resolve_base_url(port):
     return os.environ.get('PROXY_BASE_URL', '').strip() or f'http://localhost:{port}'
 
 
-def is_local_base_url(base_url):
-    host = urlparse(base_url).hostname
-    return host in {'localhost', '127.0.0.1', '::1'}
-
-
 def validate_base_url(base_url, port):
-    parsed = urlparse(base_url)
-    if parsed.scheme not in {'http', 'https'} or not parsed.netloc or not parsed.hostname:
+    if not validate_proxy_url(base_url):
         print(
             f"❌ Invalid proxy base URL: {base_url!r}. Expected an absolute "
             f"http(s) URL (e.g. 'http://localhost:{port}' or "
@@ -120,7 +115,7 @@ def main():
 
     print(f'✅ Claude Code configured to use proxy at {base_url}')
     print(f'   Settings: {settings_file}')
-    if is_local_base_url(base_url):
+    if classify_proxy(base_url) == "local":
         print(f'   Run ./start_proxy.sh in a separate terminal, then launch claude.')
     else:
         print(f'   Ensure the hosted proxy is reachable, then launch claude.')
