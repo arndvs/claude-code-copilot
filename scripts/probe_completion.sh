@@ -53,12 +53,6 @@ is_int "$interval" || interval=6
 is_int "$max_tokens" || max_tokens=64
 is_int "$curl_timeout" || curl_timeout=60
 
-body_file="${PROBE_RESPONSE_FILE:-}"
-if [ -z "$body_file" ]; then
-  body_file="$(mktemp)"
-  trap 'rm -f "$body_file"' EXIT
-fi
-
 status=""
 detail=""
 http_code="000"
@@ -75,6 +69,19 @@ emit() {
     } >> "$GITHUB_OUTPUT"
   fi
 }
+
+# Allocate the response file after emit is defined so a mktemp failure is a fail
+# verdict, not a non-zero crash (set -e).
+body_file="${PROBE_RESPONSE_FILE:-}"
+if [ -z "$body_file" ]; then
+  if ! body_file="$(mktemp 2>/dev/null)"; then
+    status="fail"
+    detail="could not allocate a temp file for the response body"
+    emit
+    exit 0
+  fi
+  trap 'rm -f "$body_file"' EXIT
+fi
 
 # A missing required input is a misconfiguration (fail loud), not a probe verdict.
 if [ -z "$base" ] || [ -z "$token" ] || [ -z "$model" ]; then
@@ -108,7 +115,13 @@ empty_seen=no
 
 # Build the request body with python3 so a model/prompt containing quotes,
 # backslashes, or newlines cannot produce invalid JSON (which would misclassify).
-payload=$(python3 -c 'import json,sys; print(json.dumps({"model":sys.argv[1],"max_tokens":int(sys.argv[2]),"messages":[{"role":"user","content":sys.argv[3]}]}))' "$model" "$max_tokens" "$prompt")
+# Guard the call so any python3 failure is a fail verdict, not a non-zero crash.
+if ! payload=$(python3 -c 'import json,sys; print(json.dumps({"model":sys.argv[1],"max_tokens":int(sys.argv[2]),"messages":[{"role":"user","content":sys.argv[3]}]}))' "$model" "$max_tokens" "$prompt" 2>/dev/null); then
+  status="fail"
+  detail="could not build the request payload (python3 error)"
+  emit
+  exit 0
+fi
 
 # Bash arithmetic loop (not `seq`) — safe for retries=0 (GNU seq exits 1 on an
 # empty range, which would break the always-exits-0 contract under set -e).
@@ -162,6 +175,9 @@ elif [ "$got" = "yes" ]; then
 elif [ "$empty_seen" = "yes" ]; then
   status="degraded"
   detail="proxy up and authenticating, but upstream returned empty completions across $retries retries"
+elif [ "$retries" -eq 0 ]; then
+  status="fail"
+  detail="no probe attempts made (PROBE_MAX_RETRIES=0)"
 else
   status="fail"
   detail="persistent non-200/non-hard responses across $retries retries — proxy not serving completions"

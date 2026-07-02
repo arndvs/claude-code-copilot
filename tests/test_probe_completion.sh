@@ -8,9 +8,9 @@
 # (mimicking `curl -w '%{http_code}'`). The script's real python3 JSON parsing
 # then classifies the stubbed response, so this exercises the actual logic.
 #
-# Covers the five classification cases from issue #78:
-#   hard-error (401/403/400/5xx/000), empty-content, non-JSON 200, success,
-#   retry exhaustion.
+# Covers the five classification cases from issue #78 — hard-error
+# (401/403/400/5xx/000), empty-content, non-JSON 200, success, retry exhaustion —
+# plus guard-rail cases: misconfiguration, non-numeric inputs, JSON escaping, retries=0.
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
