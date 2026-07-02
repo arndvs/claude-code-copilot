@@ -46,7 +46,10 @@ def main():
                     f.write('\n')
                 os.replace(tmp_path, str(settings_file))
             except BaseException:
-                os.unlink(tmp_path)
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
                 raise
             settings_file.chmod(0o600)
             print('✅ Proxy configuration removed.')
