@@ -117,19 +117,22 @@ class TestModelEntryContract:
         """All entries (incl. the wildcard) must use identical header values.
 
         A per-model header edit would make only *some* models fail — a subtle,
-        hard-to-diagnose partial outage.
+        hard-to-diagnose partial outage. The check is order-independent: it groups
+        every entry by the value it uses for each header and asserts a single
+        distinct value, so a divergence names all sides rather than implying the
+        first entry is canonical.
         """
         model_list = _model_list(config)
-        canonical = {k: _entry_headers(model_list[0]).get(k) for k in REQUIRED_HEADER_KEYS}
-        for entry in model_list:
-            name = entry.get("model_name", "<unnamed>")
-            headers = _entry_headers(entry)
-            for key in REQUIRED_HEADER_KEYS:
-                assert headers.get(key) == canonical[key], (
-                    f"Model '{name}' header {key}={headers.get(key)!r} diverges from the "
-                    f"canonical value {canonical[key]!r} used by other entries. All "
-                    f"entries must use identical header values (CONTEXT.md §1)."
-                )
+        for key in REQUIRED_HEADER_KEYS:
+            by_value = {}
+            for entry in model_list:
+                value = _entry_headers(entry).get(key)
+                by_value.setdefault(value, []).append(entry.get("model_name", "<unnamed>"))
+            assert len(by_value) == 1, (
+                f"Header {key} has inconsistent values across entries: "
+                f"{ {value: models for value, models in by_value.items()} }. All entries "
+                f"must use identical header values (CONTEXT.md §1)."
+            )
 
 
 class TestScriptHeaderDrift:
@@ -138,10 +141,11 @@ class TestScriptHeaderDrift:
     def _extract_script_headers(self):
         """Extract the four header values embedded as jq string literals.
 
-        The values live in a jq string-concatenation expression as escaped
-        literals, e.g.  ``+ "        Editor-Version: \\"vscode/1.106.3\\"\\n"``.
-        The regex tolerates both escaped (``\\"``) and raw (``"``) quoting so a
-        reformat of the jq filter does not silently defeat the check.
+        In scripts/list-copilot-models.sh the values sit inside a jq
+        string-concatenation expression where each quote is backslash-escaped
+        (the source has a backslash immediately before each double quote). The
+        regex tolerates both that backslash-escaped form and a plain-quoted form,
+        so reformatting the jq filter cannot silently defeat the check.
         """
         if not MODELS_SCRIPT_PATH.exists():
             pytest.skip(f"list-copilot-models.sh not found at {MODELS_SCRIPT_PATH}")
@@ -164,14 +168,22 @@ class TestScriptHeaderDrift:
 
         The script generates config entries; if its hardcoded headers drift from
         the config, it silently emits entries with stale headers that Copilot
-        would reject.
+        would reject. Order-independent: compares the script value against the set
+        of values the config actually uses, and fails clearly if the config value
+        is missing rather than comparing against None.
         """
         model_list = _model_list(config)
-        config_headers = {k: _entry_headers(model_list[0]).get(k) for k in REQUIRED_HEADER_KEYS}
         script_headers = self._extract_script_headers()
         for key in REQUIRED_HEADER_KEYS:
-            assert script_headers[key] == config_headers[key], (
-                f"Header {key} drift: list-copilot-models.sh has {script_headers[key]!r} "
-                f"but litellm_config.yaml has {config_headers[key]!r}. Update the script "
+            config_values = {_entry_headers(entry).get(key) for entry in model_list}
+            config_values.discard(None)
+            config_values.discard("")
+            assert config_values, (
+                f"No config value found for header {key} in litellm_config.yaml; cannot "
+                f"check {MODELS_SCRIPT_PATH.name} for drift (CONTEXT.md §1)."
+            )
+            assert script_headers[key] in config_values, (
+                f"Header {key} drift: {MODELS_SCRIPT_PATH.name} has {script_headers[key]!r} "
+                f"but litellm_config.yaml uses {sorted(config_values)!r}. Update the script "
                 f"when config headers change so generated entries stay valid (CONTEXT.md §1)."
             )
