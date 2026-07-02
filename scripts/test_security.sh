@@ -189,7 +189,7 @@ JSON
     else
         fail "claude-status local-host detection does not include IPv6 loopback"
     fi
-elif grep -A20 'urlparse(sys.argv\[1\]).hostname' Makefile | grep -q '"::1"'; then
+elif grep -q '"::1"' scripts/proxy_status.py; then
     pass "claude-status local-host detection includes IPv6 loopback"
 else
     fail "claude-status local-host detection does not include IPv6 loopback"
@@ -213,7 +213,7 @@ JSON
     else
         fail "claude-status does not validate proxy URL before curl"
     fi
-elif grep -A12 'PROXY_URL="http://localhost' Makefile | grep -q 'Proxy URL in settings is invalid'; then
+elif grep -q 'Proxy URL in settings is invalid' scripts/proxy_status.py; then
     pass "claude-status validates proxy URL before curl"
 else
     fail "claude-status does not validate proxy URL before curl"
@@ -237,7 +237,7 @@ JSON
     else
         fail "claude-status accepts proxy URLs without hostnames"
     fi
-elif grep -A12 'p.scheme in ("http","https")' Makefile | grep -q 'p.hostname'; then
+elif grep -q 'parsed.hostname' scripts/proxy_status.py; then
     pass "claude-status rejects proxy URLs without hostnames"
 else
     fail "claude-status accepts proxy URLs without hostnames"
@@ -258,7 +258,7 @@ JSON
     else
         fail "claude-status mishandles malformed env blocks"
     fi
-elif grep -q 'isinstance(env, dict)' Makefile; then
+elif grep -q 'isinstance(env, dict)' scripts/proxy_status.py; then
     pass "claude-status handles malformed env blocks"
 else
     fail "claude-status mishandles malformed env blocks"
@@ -282,8 +282,7 @@ JSON
     else
         fail "claude-status did not strip trailing proxy URL slash"
     fi
-# shellcheck disable=SC2016  # intentional: grep for literal $$ Makefile escape
-elif grep -q 'PROXY_URL=$${PROXY_URL%/}' Makefile; then
+elif grep -qF 'rstrip("/")' scripts/proxy_status.py; then
     pass "claude-status strips trailing proxy URL slash"
 else
     fail "claude-status did not strip trailing proxy URL slash"
@@ -333,7 +332,7 @@ FAKE_REPO="$TMPDIR_ROOT/repo2b"
 FAKE_SETTINGS_FILE_2B="$FAKE_HOME3B/.claude/settings.json"
 HOSTED_PROXY_URL="https://proxy.example.test"
 mkdir -p "$(dirname "$FAKE_SETTINGS_FILE_2B")" "$FAKE_REPO/scripts"
-cp scripts/claude_enable.py "$FAKE_REPO/scripts/claude_enable.py"
+cp scripts/claude_enable.py scripts/proxy_status.py "$FAKE_REPO/scripts/"
 cat > "$FAKE_REPO/.env" <<EOF
 LITELLM_MASTER_KEY=$FAKE_KEY
 LITELLM_PORT=4999
