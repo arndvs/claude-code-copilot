@@ -55,15 +55,40 @@ def config():
 
 
 def _model_list(config):
-    """Return a non-empty model_list or fail with a clear message."""
+    """Return a non-empty model_list or fail with a clear message.
+
+    Asserts the value is a list up front: a structurally wrong config (e.g.
+    model_list is a mapping or string) would otherwise let the per-entry loops
+    iterate unexpected values and fail confusingly, instead of surfacing a clear
+    contract violation (CONTEXT.md §1).
+    """
     model_list = config.get("model_list", [])
-    assert model_list, "model_list is empty — the proxy has no routes to serve"
+    assert isinstance(model_list, list) and model_list, (
+        f"model_list must be a non-empty list; got {type(model_list).__name__} "
+        f"({model_list!r}). The proxy has no routes to serve (CONTEXT.md §1)."
+    )
     return model_list
+
+
+def _litellm_params(entry):
+    """Return an entry's litellm_params mapping, asserting it is a mapping.
+
+    A structural contract test must fail with a clear message when
+    litellm_params is present but not a mapping, rather than raising
+    AttributeError from a .get() call on a non-mapping value (CONTEXT.md §1).
+    """
+    name = entry.get("model_name", "<unnamed>")
+    params = entry.get("litellm_params", {})
+    assert isinstance(params, dict), (
+        f"Model '{name}' has litellm_params of type {type(params).__name__}; "
+        f"every entry's litellm_params must be a mapping (CONTEXT.md §1)."
+    )
+    return params
 
 
 def _entry_headers(entry):
     """Return an entry's extra_headers mapping (or an empty dict)."""
-    headers = entry.get("litellm_params", {}).get("extra_headers", {})
+    headers = _litellm_params(entry).get("extra_headers", {})
     return headers if isinstance(headers, dict) else {}
 
 
@@ -91,7 +116,7 @@ class TestModelEntryContract:
         """
         for entry in _model_list(config):
             name = entry.get("model_name", "<unnamed>")
-            model = entry.get("litellm_params", {}).get("model")
+            model = _litellm_params(entry).get("model")
             assert isinstance(model, str) and model.startswith(COPILOT_MODEL_PREFIX), (
                 f"Model '{name}' routes to {model!r}; expected a value starting with "
                 f"{COPILOT_MODEL_PREFIX!r} (CONTEXT.md §1)."
@@ -101,7 +126,7 @@ class TestModelEntryContract:
         """Copilot rejects requests missing any of the four editor headers."""
         for entry in _model_list(config):
             name = entry.get("model_name", "<unnamed>")
-            params = entry.get("litellm_params", {})
+            params = _litellm_params(entry)
             assert isinstance(params.get("extra_headers"), dict), (
                 f"Model '{name}' has no extra_headers mapping; the four editor "
                 f"headers are required on every entry (CONTEXT.md §1)."
@@ -187,3 +212,27 @@ class TestScriptHeaderDrift:
                 f"but litellm_config.yaml uses {sorted(config_values)!r}. Update the script "
                 f"when config headers change so generated entries stay valid (CONTEXT.md §1)."
             )
+
+
+class TestMalformedConfigFailsLoud:
+    """Structural breaks must fail with a clear contract message, not AttributeError.
+
+    Guards the round-3 review asks on #83: the helpers assert types up front so a
+    malformed litellm_config.yaml yields an actionable failure instead of an
+    opaque AttributeError (from .get() on a non-mapping) or a confusing iteration
+    over unexpected values.
+    """
+
+    @pytest.mark.parametrize("bad", ["not-a-list", {"model_name": "x"}, 42, None])
+    def test_model_list_must_be_a_non_empty_list(self, bad):
+        with pytest.raises(AssertionError, match="model_list must be a non-empty list"):
+            _model_list({"model_list": bad})
+
+    def test_model_list_rejects_empty_list(self):
+        with pytest.raises(AssertionError, match="model_list must be a non-empty list"):
+            _model_list({"model_list": []})
+
+    @pytest.mark.parametrize("bad", ["oops", ["a", "b"], 7])
+    def test_litellm_params_must_be_a_mapping(self, bad):
+        with pytest.raises(AssertionError, match="must be a mapping"):
+            _litellm_params({"model_name": "m", "litellm_params": bad})
