@@ -282,7 +282,7 @@ JSON
     else
         fail "claude-status did not strip trailing proxy URL slash"
     fi
-elif grep -q 'rstrip' scripts/proxy_status.py; then
+elif grep -qF 'rstrip("/")' scripts/proxy_status.py; then
     pass "claude-status strips trailing proxy URL slash"
 else
     fail "claude-status did not strip trailing proxy URL slash"

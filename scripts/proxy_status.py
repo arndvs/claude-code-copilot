@@ -9,10 +9,12 @@ orchestrates (file existence, redacted display, spacing); Python does the logic.
 
 stdlib-only. Invoked by the Makefile as::
 
-    python3 scripts/proxy_status.py <settings_file>
+    python3 scripts/proxy_status.py <settings_file> [fallback_port]
 
 which prints the routing label and proxy health line for a settings file the
-Makefile has already displayed (redacted). Exits 0 in all cases — a status
+Makefile has already displayed (redacted). The optional second argument is the
+Makefile's ``$(PORT)`` default — the fallback port used when ANTHROPIC_BASE_URL
+is empty and ``.env`` has no LITELLM_PORT. Exits 0 in all cases — a status
 report never fails the target.
 
 Refs #81
