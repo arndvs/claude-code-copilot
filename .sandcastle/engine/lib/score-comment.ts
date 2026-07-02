@@ -20,11 +20,23 @@ const VAGUE_PATTERNS = [
   /\bin\s+some\s+cases\b/i,
 ];
 
-const FORCED_CONFIRM_PATTERNS = [
+// Forced-confirm keywords — floor the tier at "confirm" even when the arithmetic
+// yields "auto", because these signal a behavior/contract change that needs explicit
+// human approval. These patterns are stable policy: when you change them, update the matching
+// pin in the source repo's score-comment tests and the review-pr-copilot skill's Forced-Confirm
+// list so the prose and code stay aligned.
+export const FORCED_CONFIRM_PATTERNS = [
   /\brefactor\b/i,
   /\balign\b/i,
   /\bnormalize\b/i,
   /\bstandardize\b/i,
+  /\bsemantics?\b/i,
+  /\bbehaviou?rs?\b/i,
+  /\bcontract\b/i,
+  /\bsignature\b/i,
+  /\breturn[\s-]type\b/i,
+  /\bparameter[\s-]type\b/i,
+  /\berror model\b/i,
 ];
 
 const API_CHANGE_PATTERNS = [
@@ -91,6 +103,11 @@ function collectSignals(comment: PrComment): Signal[] {
   if (/```[\s\S]*```/.test(body) || /`[^`]+`\s*(?:→|->|to)\s*`[^`]+`/.test(body)) {
     signals.push({ label: "concrete-suggestion", delta: 15 });
   }
+
+  // NOTE: the review-pr-copilot skill also lists a +15 "touched code has test coverage"
+  // signal. It is intentionally absent here — CI scores from comment metadata only and has
+  // no coverage data at scoring time, so that signal is local-only (human run). Keep this
+  // asymmetry documented in the review-pr-copilot skill.
 
   // -25 vague language
   if (matchesAny(body, VAGUE_PATTERNS)) {

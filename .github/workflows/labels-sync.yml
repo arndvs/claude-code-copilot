@@ -1,0 +1,68 @@
+name: "Labels: Sync"
+
+# Reconcile GitHub labels from the vendored .sandcastle/labels.json so a missing or
+# drifted label can't strand issues in agent:blocked. Runs when the label set changes
+# on the default branch, on a weekly cron, and on demand. Idempotent (create-or-update).
+
+on:
+  push:
+    # Default branch + main: labels.json lands on the default branch via PR, then reaches main on
+    # promotion; reconcile on both (a duplicate entry when the default already IS main is harmless).
+    branches: ["dev", "main"]
+    paths:
+      - ".sandcastle/labels.json"
+  schedule:
+    - cron: "23 9 * * 1" # Mondays 09:23 UTC — weekly reconcile
+  workflow_dispatch:
+
+jobs:
+  sync-labels:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Reconcile labels from .sandcastle/labels.json
+        run: |
+          set -euo pipefail
+          labels_file=".sandcastle/labels.json"
+          if [ ! -f "$labels_file" ]; then
+            echo "No $labels_file — nothing to sync."
+            exit 0
+          fi
+          # Capture the label rows up front so invalid JSON fails the step explicitly. Process
+          # substitution (`done < <(jq ...)`) would mask a jq parse error under `set -euo pipefail`:
+          # the loop would read zero rows and the step would still succeed. Iterating a here-string
+          # keeps `failed` in this shell (no subshell), so a failed reconcile still fails the run.
+          rows="$(jq -c '.[]' "$labels_file")" || {
+            echo "Invalid JSON in $labels_file — aborting." >&2
+            exit 1
+          }
+          failed=0
+          while read -r row; do
+            [ -n "$row" ] || continue
+            name=$(jq -er '.name' <<<"$row")
+            color=$(jq -er '.color' <<<"$row")
+            desc=$(jq -er '.description' <<<"$row")
+            if gh label create "$name" --color "$color" --description "$desc" >/dev/null 2>&1; then
+              echo "created: $name"
+            elif gh label edit "$name" --color "$color" --description "$desc" >/dev/null 2>&1; then
+              echo "synced:  $name"
+            else
+              echo "FAILED:  $name (create and edit both failed)"
+              failed=1
+            fi
+          done <<<"$rows"
+          if [ "$failed" -ne 0 ]; then
+            echo "One or more labels could not be reconciled." >&2
+            exit 1
+          fi
