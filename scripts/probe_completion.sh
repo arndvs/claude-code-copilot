@@ -45,6 +45,14 @@ prompt="${PROBE_PROMPT:-reply with the single word: pong}"
 max_tokens="${PROBE_MAX_TOKENS:-64}"
 curl_timeout="${PROBE_CURL_TIMEOUT:-60}"
 
+# Numeric inputs must be integers — a non-numeric value would crash seq/sleep/curl
+# under `set -e` and break the "always exits 0" contract. Fall back to the default.
+is_int() { case "${1:-}" in "" | *[!0-9]*) return 1 ;; *) return 0 ;; esac; }
+is_int "$retries" || retries=5
+is_int "$interval" || interval=6
+is_int "$max_tokens" || max_tokens=64
+is_int "$curl_timeout" || curl_timeout=60
+
 body_file="${PROBE_RESPONSE_FILE:-}"
 if [ -z "$body_file" ]; then
   body_file="$(mktemp)"
@@ -81,13 +89,19 @@ got=no
 hard=""
 empty_seen=no
 
+# Build the request body with python3 so a model/prompt containing quotes,
+# backslashes, or newlines cannot produce invalid JSON (which would misclassify).
+payload=$(python3 -c 'import json,sys; print(json.dumps({"model":sys.argv[1],"max_tokens":int(sys.argv[2]),"messages":[{"role":"user","content":sys.argv[3]}]}))' "$model" "$max_tokens" "$prompt")
+
 for i in $(seq 1 "$retries"); do
   http_code=$(curl -s -o "$body_file" -w '%{http_code}' --max-time "$curl_timeout" -X POST "$base/v1/messages" \
     -H "Authorization: Bearer $token" \
     -H "anthropic-version: 2023-06-01" \
     -H "content-type: application/json" \
-    -d "{\"model\":\"$model\",\"max_tokens\":$max_tokens,\"messages\":[{\"role\":\"user\",\"content\":\"$prompt\"}]}" \
+    -d "$payload" \
     || true)
+  # curl emits no code on a total failure — keep the 000 hard-error contract.
+  [ -n "$http_code" ] || http_code="000"
   # Feed the body via stdin redirection (bash resolves the path) rather than
   # interpolating $body_file into the python source — portable and injection-safe.
   etype=$(python3 -c "import json,sys; print(json.load(sys.stdin).get('error',{}).get('type',''))" < "$body_file" 2>/dev/null || true)

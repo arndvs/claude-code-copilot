@@ -32,12 +32,15 @@ mkdir -p "$STUB_DIR"
 cat > "$STUB_DIR/curl" <<'STUB'
 #!/usr/bin/env bash
 out=""
+data=""
 prev=""
 for arg in "$@"; do
   [ "$prev" = "-o" ] && out="$arg"
+  [ "$prev" = "-d" ] && data="$arg"
   prev="$arg"
 done
 [ -n "$out" ] && printf '%s' "${STUB_BODY:-}" > "$out"
+[ -n "${STUB_PAYLOAD_FILE:-}" ] && printf '%s' "$data" > "$STUB_PAYLOAD_FILE"
 printf '%s' "${STUB_HTTP_CODE:-200}"
 STUB
 chmod +x "$STUB_DIR/curl"
@@ -84,6 +87,24 @@ s=$(STUB_HTTP_CODE=200 STUB_BODY='{"content":[{"text":"x"}]}' \
     PROBE_BASE_URL="http://proxy.test" PROBE_AUTH_TOKEN="t" PROBE_MODEL="" \
     PATH="$STUB_DIR:$PATH" bash scripts/probe_completion.sh 2>/dev/null | sed -n 's/^status=//p')
 [ "$s" = "fail" ] && pass "missing PROBE_MODEL → fail" || fail "missing PROBE_MODEL → expected fail, got '$s'"
+
+# 7. Non-numeric numeric inputs must fall back to defaults, not crash (always-exits-0).
+s=$(STUB_HTTP_CODE=200 STUB_BODY='{"content":[{"type":"text","text":"pong"}]}' \
+    PROBE_BASE_URL="http://proxy.test" PROBE_AUTH_TOKEN="t" PROBE_MODEL="m" \
+    PROBE_MAX_RETRIES=abc PROBE_RETRY_INTERVAL=xyz PROBE_MAX_TOKENS=nan PROBE_CURL_TIMEOUT=zzz \
+    PATH="$STUB_DIR:$PATH" bash scripts/probe_completion.sh 2>/dev/null | sed -n 's/^status=//p')
+[ "$s" = "ok" ] && pass "non-numeric inputs → fall back, no crash" || fail "non-numeric inputs → expected ok, got '$s'"
+
+# 8. The request body must be valid JSON even with quotes/backslashes in model/prompt.
+PF="$TMPDIR_ROOT/payload.json"
+STUB_HTTP_CODE=200 STUB_BODY='{"content":[{"text":"x"}]}' STUB_PAYLOAD_FILE="$PF" \
+  PROBE_BASE_URL="http://proxy.test" PROBE_AUTH_TOKEN="t" PROBE_MODEL='m"x\y' PROBE_PROMPT='say "hi"' \
+  PROBE_MAX_RETRIES=1 PATH="$STUB_DIR:$PATH" bash scripts/probe_completion.sh >/dev/null 2>&1
+if python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$PF" 2>/dev/null; then
+  pass "request body is valid JSON with special chars in model/prompt"
+else
+  fail "request body is not valid JSON with special chars"
+fi
 
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
