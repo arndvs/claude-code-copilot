@@ -45,7 +45,7 @@ def config():
     """
     if not CONFIG_PATH.exists():
         pytest.skip(f"litellm_config.yaml not found at {CONFIG_PATH}")
-    with open(CONFIG_PATH) as f:
+    with open(CONFIG_PATH, encoding="utf-8") as f:
         data = yaml.safe_load(f)
     if not isinstance(data, dict):
         pytest.fail(
@@ -149,7 +149,7 @@ class TestScriptHeaderDrift:
         """
         if not MODELS_SCRIPT_PATH.exists():
             pytest.skip(f"list-copilot-models.sh not found at {MODELS_SCRIPT_PATH}")
-        text = MODELS_SCRIPT_PATH.read_text()
+        text = MODELS_SCRIPT_PATH.read_text(encoding="utf-8")
         found = {}
         for key in REQUIRED_HEADER_KEYS:
             match = re.search(rf'{re.escape(key)}:\s*\\?"([^"\\]+)\\?"', text)
