@@ -15,18 +15,34 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Security regression tests
-        run: bash scripts/test_security.sh
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Completion-probe classification tests
-        run: bash tests/test_probe_completion.sh
-
       - name: Install Python dependencies
         run: pip install pyyaml pytest fastapi httpx
+
+      # Convention: every shell script matching scripts/test_*.sh or tests/test_*.sh
+      # is auto-discovered and run here — add a new structural-validation test by
+      # creating a script with that name, no ci.yml edit required. Scripts must exit
+      # 0 on success and non-zero on failure. Docker-dependent tests should guard
+      # with `command -v docker` and skip gracefully when it is unavailable.
+      - name: Structural validation tests (shell)
+        run: |
+          set -euo pipefail
+          failed=0
+          for script in scripts/test_*.sh tests/test_*.sh; do
+            [ -f "$script" ] || continue
+            echo "── $script ──"
+            if bash "$script"; then
+              echo "✅ $script passed"
+            else
+              echo "❌ $script failed"
+              failed=1
+            fi
+            echo ""
+          done
+          exit "$failed"
 
       - name: Run Python unit tests
         run: pytest tests/ -q --tb=short
