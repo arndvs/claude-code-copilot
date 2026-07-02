@@ -51,6 +51,11 @@ class TestResolveProxyUrl:
         assert proxy_status.resolve_proxy_url({"env": {"ANTHROPIC_BASE_URL": 123}}) == "123"
         assert proxy_status.resolve_proxy_url({"env": {"ANTHROPIC_BASE_URL": True}}) == "True"
 
+    def test_json_null_is_coerced_not_localhost_fallback(self):
+        # An explicit JSON null must NOT be treated as "use localhost"; it is
+        # coerced so validate_proxy_url rejects it (matches the old Makefile).
+        assert proxy_status.resolve_proxy_url({"env": {"ANTHROPIC_BASE_URL": None}}) == "None"
+
 
 class TestValidateProxyUrl:
     @pytest.mark.parametrize(
@@ -167,6 +172,11 @@ class TestReadFallbackPort:
         env = tmp_path / ".env"
         env.write_text("OTHER=1\n")
         assert proxy_status.read_fallback_port(str(env), default="7777") == "7777"
+
+    def test_ignores_lookalike_keys(self, tmp_path):
+        env = tmp_path / ".env"
+        env.write_text('LITELLM_PORTAL="9999"\nLITELLM_PORT=8080\n')
+        assert proxy_status.read_fallback_port(str(env)) == "8080"
 
 
 class TestMain:

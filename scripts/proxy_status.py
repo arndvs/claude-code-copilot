@@ -41,11 +41,12 @@ def resolve_proxy_url(settings, fallback_port=DEFAULT_PORT):
     if not isinstance(env, dict) or "ANTHROPIC_BASE_URL" not in env:
         return None
     raw = env.get("ANTHROPIC_BASE_URL")
-    if raw is None or raw == "":
-        # Present but empty -> fall back to the local proxy on the resolved port.
+    if raw == "":
+        # Only an explicit empty string falls back to the local proxy. Everything
+        # else (including JSON null and non-strings) is coerced to str so
+        # validate_proxy_url surfaces it as invalid instead of silently
+        # suggesting a local proxy or raising on .rstrip().
         return f"http://localhost:{fallback_port}"
-    # Coerce non-string values (number/bool/list from malformed settings) so
-    # validate_proxy_url surfaces them as invalid instead of raising on .rstrip().
     return str(raw).rstrip("/")
 
 
@@ -85,16 +86,21 @@ def probe_health(url, timeout=3):
 
 
 def read_fallback_port(env_path=".env", default=DEFAULT_PORT):
-    """Read ``LITELLM_PORT`` from a .env file, defaulting when absent/unreadable."""
+    """Read ``LITELLM_PORT`` from a .env file, defaulting when absent/unreadable.
+
+    Tolerates a non-UTF-8 .env (a status report must never fail) and matches only
+    the exact ``LITELLM_PORT`` assignment, not lookalikes like ``LITELLM_PORTAL``.
+    """
     try:
-        for line in Path(env_path).read_text().splitlines():
-            stripped = line.strip()
-            if stripped.startswith("LITELLM_PORT"):
-                value = stripped.partition("=")[2].strip().strip('"').strip("'")
-                if value:
-                    return value
-    except OSError:
-        pass
+        lines = Path(env_path).read_text().splitlines()
+    except (OSError, UnicodeError):
+        return default
+    for line in lines:
+        key, sep, value = line.strip().partition("=")
+        if sep and key.strip() == "LITELLM_PORT":
+            value = value.strip().strip('"').strip("'")
+            if value:
+                return value
     return default
 
 
