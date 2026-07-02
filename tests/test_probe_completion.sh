@@ -106,6 +106,12 @@ else
   fail "request body is not valid JSON with special chars"
 fi
 
+# 9. retries=0 must not crash (arithmetic loop is safe; seq would exit 1).
+s=$(STUB_HTTP_CODE=200 STUB_BODY='{"content":[{"type":"text","text":"pong"}]}' \
+    PROBE_BASE_URL="http://proxy.test" PROBE_AUTH_TOKEN="t" PROBE_MODEL="m" \
+    PROBE_MAX_RETRIES=0 PATH="$STUB_DIR:$PATH" bash scripts/probe_completion.sh 2>/dev/null | sed -n 's/^status=//p')
+[ "$s" = "fail" ] && pass "retries=0 → fail, no crash" || fail "retries=0 → expected fail, got '$s'"
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 if [ "$FAIL" -gt 0 ]; then

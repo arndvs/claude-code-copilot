@@ -85,6 +85,23 @@ if [ -z "$base" ] || [ -z "$token" ] || [ -z "$model" ]; then
   exit 0
 fi
 
+# Dependency + response-file writability preflight — report a fail verdict rather
+# than crashing with a non-zero exit (set -e) if a tool or path is unusable.
+for dep in curl python3; do
+  if ! command -v "$dep" >/dev/null 2>&1; then
+    status="fail"
+    detail="required command not found: $dep"
+    emit
+    exit 0
+  fi
+done
+if ! : > "$body_file" 2>/dev/null; then
+  status="fail"
+  detail="response file is not writable: $body_file"
+  emit
+  exit 0
+fi
+
 got=no
 hard=""
 empty_seen=no
@@ -93,7 +110,9 @@ empty_seen=no
 # backslashes, or newlines cannot produce invalid JSON (which would misclassify).
 payload=$(python3 -c 'import json,sys; print(json.dumps({"model":sys.argv[1],"max_tokens":int(sys.argv[2]),"messages":[{"role":"user","content":sys.argv[3]}]}))' "$model" "$max_tokens" "$prompt")
 
-for i in $(seq 1 "$retries"); do
+# Bash arithmetic loop (not `seq`) — safe for retries=0 (GNU seq exits 1 on an
+# empty range, which would break the always-exits-0 contract under set -e).
+for ((i = 1; i <= retries; i++)); do
   http_code=$(curl -s -o "$body_file" -w '%{http_code}' --max-time "$curl_timeout" -X POST "$base/v1/messages" \
     -H "Authorization: Bearer $token" \
     -H "anthropic-version: 2023-06-01" \
