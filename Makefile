@@ -145,32 +145,7 @@ claude-status:
 	if [ -f "$$SETTINGS_FILE" ]; then \
 		python3 scripts/claude_status_redact.py < "$$SETTINGS_FILE" 2>/dev/null || { echo '(could not parse settings)'; exit 0; }; \
 		echo ""; \
-		if grep -q "ANTHROPIC_BASE_URL" "$$SETTINGS_FILE" 2>/dev/null; then \
-			PROXY_URL=$$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); env=d.get("env", {}); print(env.get("ANTHROPIC_BASE_URL", "") if isinstance(env, dict) else "")' "$$SETTINGS_FILE" 2>/dev/null); \
-			if [ -z "$$PROXY_URL" ]; then \
-				PORT=$$(grep LITELLM_PORT .env 2>/dev/null | cut -d'=' -f2 | tr -d '"' || echo '$(PORT)'); \
-				PROXY_URL="http://localhost:$${PORT:-$(PORT)}"; \
-			fi; \
-			PROXY_URL=$${PROXY_URL%/}; \
-			if ! python3 -c 'from urllib.parse import urlparse; import sys; p=urlparse(sys.argv[1]); sys.exit(0 if p.scheme in ("http","https") and p.netloc and p.hostname else 1)' "$$PROXY_URL"; then \
-				echo "❌ Proxy URL in settings is invalid: $$PROXY_URL"; \
-				exit 0; \
-			fi; \
-			if python3 -c 'from urllib.parse import urlparse; import sys; host=urlparse(sys.argv[1]).hostname; sys.exit(0 if host in ("localhost","127.0.0.1","::1") else 1)' "$$PROXY_URL"; then \
-				echo "🔗 Routing: local proxy"; \
-				PROXY_HINT="run 'make start'"; \
-			else \
-				echo "🔗 Routing: hosted proxy"; \
-				PROXY_HINT="check the hosted proxy endpoint"; \
-			fi; \
-			if curl -sf "$$PROXY_URL/health/readiness" >/dev/null 2>&1; then \
-				echo "✅ Proxy: running at $$PROXY_URL"; \
-			else \
-				echo "❌ Proxy: not running at $$PROXY_URL — $$PROXY_HINT"; \
-			fi; \
-		else \
-			echo "🌐 Routing: Anthropic API directly"; \
-		fi; \
+		python3 scripts/proxy_status.py "$$SETTINGS_FILE"; \
 	else \
 		echo "No settings file — using Claude Code defaults (Anthropic direct)"; \
 	fi
