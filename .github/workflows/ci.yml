@@ -22,16 +22,16 @@ jobs:
       - name: Install Python dependencies
         run: pip install pyyaml pytest fastapi httpx
 
-      # Convention: every shell script matching scripts/test_*.sh or tests/test_*.sh
-      # is auto-discovered and run here — add a new structural-validation test by
-      # creating a script with that name, no ci.yml edit required. Scripts must exit
-      # 0 on success and non-zero on failure. Docker-dependent tests should guard
-      # with `command -v docker` and skip gracefully when it is unavailable.
+      # Convention: every shell script matching scripts/test_*.sh, tests/test_*.sh, or the
+      # vendored .sandcastle/scripts/test_*.sh is auto-discovered and run here — add a new
+      # structural-validation test by creating a script with that name, no ci.yml edit
+      # required. Scripts must exit 0 on success and non-zero on failure. Docker-dependent
+      # tests should guard with `command -v docker` and skip gracefully when it is unavailable.
       - name: Structural validation tests (shell)
         run: |
           set -euo pipefail
           failed=0
-          for script in scripts/test_*.sh tests/test_*.sh; do
+          for script in scripts/test_*.sh tests/test_*.sh .sandcastle/scripts/test_*.sh; do
             [ -f "$script" ] || continue
             echo "── $script ──"
             if bash "$script"; then

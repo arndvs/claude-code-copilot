@@ -1,14 +1,13 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { readFileSync } from "node:fs";
-import { execFileSync } from "node:child_process";
-import { run, Output, claudeCode } from "@ai-hero/sandcastle";
+import { Output, claudeCode } from "@ai-hero/sandcastle";
 import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
 import { runWithExtraction } from "../lib/run-with-extraction.js";
 import { UpdateBranchOutput } from "../schemas/update-branch-output.js";
 import { loadConfig } from "../lib/config.js";
 import { resolvePrompt, configPromptArgs } from "../lib/resolve-prompt.js";
-import { required, fail, sh, shFile } from "../lib/shell-helpers.js";
+import { fail, sh, shFile, shFileInherit } from "../lib/shell-helpers.js";
 import { resolveDefaultExtractionsDir, resolveDefaultTemplatesDir } from "../lib/default-template-paths.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -37,7 +36,7 @@ export async function runUpdateBranch(opts: {
 
   console.log(`[update-branch] PR #${prNumber}, branch ${branch}, base ${baseRef}`);
 
-  execFileSync("git", ["fetch", "origin", baseRef], { cwd: repoDir, stdio: "inherit" });
+  shFileInherit("git", ["fetch", "origin", baseRef], repoDir);
 
   const preMergeSha = shFile("git", ["rev-parse", "HEAD"], repoDir).trim();
   const baseSha = shFile("git", ["rev-parse", `origin/${baseRef}`], repoDir).trim();
@@ -101,10 +100,7 @@ function tryMerge(
   cwd: string,
 ): { status: "clean" } | { status: "conflict"; conflicts: string[] } {
   try {
-    execFileSync("git", ["merge", `origin/${baseRef}`, "--no-edit"], {
-      cwd,
-      stdio: "inherit",
-    });
+    shFileInherit("git", ["merge", `origin/${baseRef}`, "--no-edit"], cwd);
     return { status: "clean" };
   } catch {
     const conflicts = sh("git diff --name-only --diff-filter=U", cwd)

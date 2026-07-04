@@ -1,6 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { Output, StructuredOutputError, claudeCode } from "@ai-hero/sandcastle";
+import { Output, claudeCode } from "@ai-hero/sandcastle";
 import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
 import { ReviewOutput } from "../schemas/review-output.js";
 import { fetchPrComments } from "../lib/fetch-pr-comments.js";
@@ -25,45 +25,34 @@ export async function runReview(opts: { prNumber: string; repoDir: string; model
   console.log(`[review] PR: ${prContext.prTitle}`);
   console.log(`[review] Existing threads: ${prContext.comments.review_threads.length}`);
 
-  try {
-    const promptFile = await resolvePrompt({ name: "review", config, repoDir, templatesDir });
+  const promptFile = await resolvePrompt({ name: "review", config, repoDir, templatesDir });
 
-    const result = await runWithRetry({
-      agent: claudeCode(model),
-      sandbox: noSandbox(),
-      cwd: repoDir,
-      promptFile,
-      promptArgs: {
-        ...configPromptArgs(config),
-        PR_NUMBER: prNumber,
-        PR_COMMENTS_JSON: JSON.stringify(prContext.comments, null, 2),
-      },
-      output: Output.object({ tag: "output", schema: ReviewOutput }),
-      logging: { type: "stdout" },
-    });
+  const result = await runWithRetry({
+    agent: claudeCode(model),
+    sandbox: noSandbox(),
+    cwd: repoDir,
+    promptFile,
+    promptArgs: {
+      ...configPromptArgs(config),
+      PR_NUMBER: prNumber,
+      PR_COMMENTS_JSON: JSON.stringify(prContext.comments, null, 2),
+    },
+    output: Output.object({ tag: "output", schema: ReviewOutput }),
+    logging: { type: "stdout" },
+  });
 
-    const reviewResult = postReview({
-      prNumber,
-      cwd: repoDir,
-      prComments: prContext.comments,
-      inlineComments: result.output.inlineComments,
-      threadReplies: result.output.replies,
-      reviewBody: result.output.summary,
-      logPrefix: "[review]",
-    });
+  const reviewResult = postReview({
+    prNumber,
+    cwd: repoDir,
+    prComments: prContext.comments,
+    inlineComments: result.output.inlineComments,
+    threadReplies: result.output.replies,
+    reviewBody: result.output.summary,
+    logPrefix: "[review]",
+  });
 
-    console.log(`\n[review] Complete`);
-    console.log(`  summary: ${result.output.summary.slice(0, 80)}...`);
-    console.log(`  inline comments: ${reviewResult.postedInlineComments}`);
-    console.log(`  thread replies: ${reviewResult.postedReplies}`);
-  } catch (error) {
-    if (error instanceof StructuredOutputError) {
-      console.error(`[review] Failed: malformed agent output`);
-      console.error(`[review] Tag: <${error.tag}>`);
-      console.error(`[review] Raw matched: ${error.rawMatched ?? "(no match found)"}`);
-      if (error.cause) console.error(`[review] Cause:`, error.cause);
-      process.exit(1);
-    }
-    throw error;
-  }
+  console.log(`\n[review] Complete`);
+  console.log(`  summary: ${result.output.summary.slice(0, 80)}...`);
+  console.log(`  inline comments: ${reviewResult.postedInlineComments}`);
+  console.log(`  thread replies: ${reviewResult.postedReplies}`);
 }

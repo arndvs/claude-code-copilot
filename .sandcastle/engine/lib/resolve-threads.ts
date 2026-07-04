@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { shFile } from "./shell-helpers.js";
 
 const RESOLVE_MUTATION = `
 mutation($threadId: ID!) {
@@ -20,11 +20,7 @@ export function resolveThread(opts: { threadId: string; cwd: string }): void {
 
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      execFileSync("gh", ["api", "graphql", "-F", `threadId=${opts.threadId}`, "-f", `query=${RESOLVE_MUTATION}`], {
-        encoding: "utf8",
-        cwd: opts.cwd,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
+      shFile("gh", ["api", "graphql", "-F", `threadId=${opts.threadId}`, "-f", `query=${RESOLVE_MUTATION}`], opts.cwd);
       console.log(`Resolved thread ${opts.threadId}`);
       return;
     } catch (err: unknown) {

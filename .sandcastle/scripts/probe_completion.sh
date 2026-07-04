@@ -3,23 +3,21 @@
 # probe_completion.sh — probe a single model for a real completion through the
 # proxy and classify the outcome as ok / degraded / fail.
 #
-# Shared by .github/workflows/proxy-canary.yml (maps degraded -> warn, no page)
-# and .github/workflows/model-health.yml (maps degraded -> broken). Encapsulates
-# the retry loop, curl construction, JSON parsing, and hard-error vs
-# empty-content classification — INCLUDING the non-JSON-200 detection that
-# previously lived only in proxy-canary (model-health silently lacked it).
+# Shared by .github/workflows/proxy-canary.yml. Encapsulates the retry loop,
+# curl construction, JSON parsing, SSE detection, and hard-error vs
+# empty-content classification.
 #
 # The script ALWAYS exits 0 and reports the outcome via output variables, so a
 # caller can distinguish "the probe says fail" (status=fail) from "the probe
 # script itself crashed" (non-zero exit).
 #
 # Inputs (environment variables):
-#   PROBE_BASE_URL        required  proxy base URL (a trailing slash is stripped)
+#   PROBE_BASE_URL        required  proxy base URL (trailing slash stripped)
 #   PROBE_AUTH_TOKEN      required  bearer token for Authorization
 #   PROBE_MODEL           required  model name / alias to probe
-#   PROBE_MAX_RETRIES     optional  attempts before giving up          (default 5)
+#   PROBE_MAX_RETRIES     optional  attempts before giving up            (default 5)
 #   PROBE_RETRY_INTERVAL  optional  seconds to sleep between attempts   (default 6)
-#   PROBE_PROMPT          optional  user prompt      (default "reply with the single word: pong")
+#   PROBE_PROMPT          optional  user prompt  (default "reply with the single word: pong")
 #   PROBE_MAX_TOKENS      optional  max_tokens in the request           (default 64)
 #   PROBE_CURL_TIMEOUT    optional  curl --max-time seconds per attempt (default 60)
 #   PROBE_RESPONSE_FILE   optional  where the response body is written  (default: mktemp)
@@ -45,33 +43,44 @@ prompt="${PROBE_PROMPT:-reply with the single word: pong}"
 max_tokens="${PROBE_MAX_TOKENS:-64}"
 curl_timeout="${PROBE_CURL_TIMEOUT:-60}"
 
-# Numeric inputs must be integers — a non-numeric value would crash seq/sleep/curl
-# under `set -e` and break the "always exits 0" contract. Fall back to the default.
+# Numeric inputs must be integers — a non-numeric value would crash the arithmetic
+# loop or curl under set -e and break the "always exits 0" contract.
 is_int() { case "${1:-}" in "" | *[!0-9]*) return 1 ;; *) return 0 ;; esac; }
-is_int "$retries" || retries=5
-is_int "$interval" || interval=6
-is_int "$max_tokens" || max_tokens=64
+is_int "$retries"      || retries=5
+is_int "$interval"     || interval=6
+is_int "$max_tokens"   || max_tokens=64
 is_int "$curl_timeout" || curl_timeout=60
 
 status=""
 detail=""
 http_code="000"
 
+sanitize_output_value() {
+  local value="${1:-}"
+  value="${value//$'\r'/ }"
+  value="${value//$'\n'/ }"
+  printf '%s' "$value"
+}
+
 emit() {
-  printf 'status=%s\n' "$status"
-  printf 'detail=%s\n' "$detail"
-  printf 'http_code=%s\n' "$http_code"
+  local safe_status safe_detail safe_http_code
+  safe_status="$(sanitize_output_value "$status")"
+  safe_detail="$(sanitize_output_value "$detail")"
+  safe_http_code="$(sanitize_output_value "$http_code")"
+  printf 'status=%s\n'   "$safe_status"
+  printf 'detail=%s\n'   "$safe_detail"
+  printf 'http_code=%s\n' "$safe_http_code"
   if [ -n "${GITHUB_OUTPUT:-}" ]; then
     {
-      printf 'status=%s\n' "$status"
-      printf 'detail=%s\n' "$detail"
-      printf 'http_code=%s\n' "$http_code"
+      printf 'status=%s\n'   "$safe_status"
+      printf 'detail=%s\n'   "$safe_detail"
+      printf 'http_code=%s\n' "$safe_http_code"
     } >> "$GITHUB_OUTPUT"
   fi
 }
 
 # Allocate the response file after emit is defined so a mktemp failure is a fail
-# verdict, not a non-zero crash (set -e).
+# verdict, not a non-zero crash under set -e.
 body_file="${PROBE_RESPONSE_FILE:-}"
 if [ -z "$body_file" ]; then
   if ! body_file="$(mktemp 2>/dev/null)"; then
@@ -92,8 +101,7 @@ if [ -z "$base" ] || [ -z "$token" ] || [ -z "$model" ]; then
   exit 0
 fi
 
-# Dependency + response-file writability preflight — report a fail verdict rather
-# than crashing with a non-zero exit (set -e) if a tool or path is unusable.
+# Dependency + response-file writability preflight.
 for dep in curl python3; do
   if ! command -v "$dep" >/dev/null 2>&1; then
     status="fail"
@@ -114,45 +122,68 @@ hard=""
 empty_seen=no
 
 # Build the request body with python3 so a model/prompt containing quotes,
-# backslashes, or newlines cannot produce invalid JSON (which would misclassify).
-# Guard the call so any python3 failure is a fail verdict, not a non-zero crash.
-if ! payload=$(python3 -c 'import json,sys; print(json.dumps({"model":sys.argv[1],"max_tokens":int(sys.argv[2]),"messages":[{"role":"user","content":sys.argv[3]}]}))' "$model" "$max_tokens" "$prompt" 2>/dev/null); then
+# backslashes, or newlines cannot produce invalid JSON.
+if ! payload=$(python3 -c 'import json,sys; print(json.dumps({"model":sys.argv[1],"max_tokens":int(sys.argv[2]),"messages":[{"role":"user","content":sys.argv[3]}]}))' \
+    "$model" "$max_tokens" "$prompt" 2>/dev/null); then
   status="fail"
   detail="could not build the request payload (python3 error)"
   emit
   exit 0
 fi
 
-# Bash arithmetic loop (not `seq`) — safe for retries=0 (GNU seq exits 1 on an
-# empty range, which would break the always-exits-0 contract under set -e).
+# Bash arithmetic loop (not seq) — safe for retries=0.
 for ((i = 1; i <= retries; i++)); do
-  http_code=$(curl -s -o "$body_file" -w '%{http_code}' --max-time "$curl_timeout" -X POST "$base/v1/messages" \
+  http_code=$(curl -s -o "$body_file" -w '%{http_code}' --max-time "$curl_timeout" \
+    -X POST "$base/v1/messages" \
     -H "Authorization: Bearer $token" \
     -H "anthropic-version: 2023-06-01" \
     -H "content-type: application/json" \
     -d "$payload" \
     || true)
-  # curl emits no code on a total failure — keep the 000 hard-error contract.
   [ -n "$http_code" ] || http_code="000"
-  # Feed the body via stdin redirection (bash resolves the path) rather than
-  # interpolating $body_file into the python source — portable and injection-safe.
   etype=$(python3 -c "import json,sys; print(json.load(sys.stdin).get('error',{}).get('type',''))" < "$body_file" 2>/dev/null || true)
   case "$http_code" in
     200)
-      # A non-JSON 200 on /v1/messages is a hard proxy/upstream bug, not the
-      # transient empty-content quirk — fail on it instead of masking as degraded.
-      if ! python3 -c "import json,sys; json.load(sys.stdin)" < "$body_file" 2>/dev/null; then
-        hard="200 but response body was not valid JSON — proxy/upstream serving malformed completions"
-        break
+      # Some proxy configs (litellm_params.stream:true) force SSE on all
+      # completions — even non-streaming probe requests. An SSE body starts
+      # with "event:", "data:", or bare ":" (keep-alive comment) lines and is
+      # not valid JSON; parse content_block_delta events instead of
+      # d.get('content'). Non-SSE path is unchanged (backwards-compatible).
+      if head -c 128 "$body_file" | grep -qE '^(event:|data:|:)'; then
+        has=$(python3 - "$body_file" <<'PY' 2>/dev/null || echo no
+import json, sys
+rv = 'no'
+for l in open(sys.argv[1]):
+    if l.startswith('data:') and l.rstrip('\r\n') not in ('data: [DONE]', 'data:[DONE]'):
+        raw = l[5:].lstrip(' ')
+        try:
+            d = json.loads(raw)
+            if d.get('type') == 'content_block_delta' and d.get('delta', {}).get('text'):
+                rv = 'yes'
+                break
+        except Exception:
+            pass
+print(rv)
+PY
+)
+        [ "$has" = "yes" ] && log "completion attempt $i/$retries: 200 SSE with content ✓" \
+                           || log "completion attempt $i/$retries: 200 SSE — empty content"
+      else
+        # Non-streaming JSON path — a non-JSON, non-SSE 200 is a hard proxy bug.
+        if ! python3 -c "import json,sys; json.load(sys.stdin)" < "$body_file" 2>/dev/null; then
+          hard="200 but response body was not valid JSON — proxy/upstream serving malformed completions"
+          break
+        fi
+        has=$(python3 -c "import json,sys; d=json.load(sys.stdin); print('yes' if d.get('content') else 'no')" \
+            < "$body_file" 2>/dev/null || echo no)
+        [ "$has" = "yes" ] && log "completion attempt $i/$retries: 200 JSON with content ✓" \
+                           || log "completion attempt $i/$retries: 200 JSON — empty content"
       fi
-      has=$(python3 -c "import json,sys; d=json.load(sys.stdin); print('yes' if d.get('content') else 'no')" < "$body_file" 2>/dev/null || echo no)
       if [ "$has" = "yes" ]; then
         got=yes
-        log "completion attempt $i/$retries: 200 with content ✓"
         break
       fi
       empty_seen=yes
-      log "completion attempt $i/$retries: 200 but empty content — retrying"
       ;;
     401 | 403) hard="auth error HTTP $http_code${etype:+ (type=$etype)} — master key likely wrong/mismatched"; break ;;
     400)       hard="HTTP 400${etype:+ (type=$etype)} — e.g. no_db_connection / bad request"; break ;;
@@ -160,7 +191,6 @@ for ((i = 1; i <= retries; i++)); do
     5*)        hard="upstream HTTP $http_code${etype:+ (type=$etype)}"; break ;;
     *)         log "completion attempt $i/$retries: HTTP $http_code — retrying" ;;
   esac
-  # Skip the sleep after the final attempt — nothing follows it.
   if [ "$i" -lt "$retries" ]; then
     sleep "$interval"
   fi
