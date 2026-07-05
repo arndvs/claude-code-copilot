@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { shFile } from "../lib/shell-helpers.js";
 
 /**
  * Review the labeled issue entrypoint without touching PR-only plumbing.
@@ -9,11 +9,7 @@ import { execFileSync } from "node:child_process";
 export function runReviewIssue(opts: { issueNumber: string; repoDir: string }): void {
   console.log(`[review-issue] Reading issue #${opts.issueNumber}...`);
 
-  const issueJson = execFileSync("gh", ["issue", "view", opts.issueNumber, "--json", "title,state"], {
-    encoding: "utf8",
-    cwd: opts.repoDir,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  const issueJson = shFile("gh", ["issue", "view", opts.issueNumber, "--json", "title,state"], opts.repoDir);
 
   const issue = JSON.parse(issueJson) as { title: string; state: string };
   console.log(`[review-issue] Issue: ${issue.title}`);

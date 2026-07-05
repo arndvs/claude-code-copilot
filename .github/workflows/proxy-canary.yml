@@ -28,77 +28,58 @@ jobs:
           AUTH_TOKEN: ${{ secrets.LITELLM_MASTER_KEY }}
         run: |
           set -euo pipefail
-          fail() {
-            { echo "status=fail"; echo "detail=$1"; } >> "$GITHUB_OUTPUT"
-            echo "❌ $1"
-            exit 0
-          }
           base="${BASE_URL%/}"
           if [ -z "$base" ] || [ -z "${AUTH_TOKEN:-}" ]; then
-            fail "secrets LITELLM_BASE_URL / LITELLM_MASTER_KEY are not set on this repo"
+            echo "status=fail" >> "$GITHUB_OUTPUT"
+            echo "detail=secrets LITELLM_BASE_URL / LITELLM_MASTER_KEY are not set on this repo" >> "$GITHUB_OUTPUT"
+            echo "❌ secrets LITELLM_BASE_URL / LITELLM_MASTER_KEY are not set on this repo"
+            exit 0
           fi
 
-          # Probe model = this install's configured model (sandcastle.config.json),
-          # falling back to a sane default if the config is missing/unreadable.
+          # Probe model = this install's configured model (sandcastle.config.json)
           model=$(python3 -c "import json; print(json.load(open('sandcastle.config.json')).get('model',''))" 2>/dev/null || true)
           [ -n "$model" ] || model="claude-sonnet-4-6"
           echo "Probe model: $model"
 
           # 1) readiness (no auth, must be 200)
-          # curl -w '%{http_code}' writes 000 to stdout on failure; use || true so
-          # curl's own 000 is kept (|| echo 000 would produce 000000).
           code=$(curl -s -o /tmp/ready.txt -w '%{http_code}' --max-time 15 "$base/health/readiness" || true)
           echo "readiness: HTTP $code — $(cat /tmp/ready.txt 2>/dev/null || true)"
-          [ "$code" = "200" ] || fail "readiness returned HTTP $code"
-
-          # 2) a real completion through the proxy.
-          #    HARD failures (auth / DB / 5xx / unreachable) page immediately.
-          #    Some upstreams return a 200 with EMPTY content in short bursts — a
-          #    transient quirk, not an outage — so retry across ~30s and, if still
-          #    empty, WARN rather than page (the proxy is up + authenticating).
-          attempts=5
-          got=no
-          hard=""
-          empty_seen=no
-          for i in $(seq 1 "$attempts"); do
-            code=$(curl -s -o /tmp/msg.json -w '%{http_code}' --max-time 60 -X POST "$base/v1/messages" \
-              -H "Authorization: Bearer $AUTH_TOKEN" \
-              -H "anthropic-version: 2023-06-01" \
-              -H "content-type: application/json" \
-              -d "{\"model\":\"$model\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":\"reply with the single word: pong\"}]}" \
-              || true)
-            etype=$(python3 -c "import json; print(json.load(open('/tmp/msg.json')).get('error',{}).get('type',''))" 2>/dev/null || true)
-            case "$code" in
-              200)
-                # A non-JSON 200 on /v1/messages is a hard proxy/upstream bug, not the
-                # transient empty-content quirk — page on it instead of masking as degraded.
-                if ! python3 -c "import json; json.load(open('/tmp/msg.json'))" 2>/dev/null; then
-                  hard="200 but response body was not valid JSON — proxy/upstream serving malformed completions"; break
-                fi
-                has=$(python3 -c "import json; d=json.load(open('/tmp/msg.json')); print('yes' if d.get('content') else 'no')" 2>/dev/null || echo no)
-                if [ "$has" = "yes" ]; then got=yes; echo "completion attempt $i/$attempts: 200 with content ✓"; break; fi
-                empty_seen=yes
-                echo "completion attempt $i/$attempts: 200 but empty content — retrying" ;;
-              401|403) hard="auth error HTTP $code${etype:+ (type=$etype)} — master key likely wrong/mismatched"; break ;;
-              400)     hard="HTTP 400${etype:+ (type=$etype)} — e.g. no_db_connection / bad request"; break ;;
-              000)     hard="connection failed — proxy unreachable"; break ;;
-              5*)      hard="upstream HTTP $code${etype:+ (type=$etype)}"; break ;;
-              *)       echo "completion attempt $i/$attempts: HTTP $code — retrying" ;;
-            esac
-            sleep 6
-          done
-
-          if [ -n "$hard" ]; then fail "$hard"; fi
-          if [ "$got" = "yes" ]; then
-            echo "status=ok" >> "$GITHUB_OUTPUT"
-            echo "✅ proxy canary passed (readiness + completion)"
-          elif [ "$empty_seen" = "yes" ]; then
-            echo "::warning::Proxy is up and authenticating, but upstream returned empty completions across $attempts retries. Not paging."
-            echo "status=degraded" >> "$GITHUB_OUTPUT"
-            echo "⚠️ degraded: empty completions, but proxy + auth healthy"
-          else
-            fail "persistent non-200/non-hard responses across $attempts retries — proxy not serving completions"
+          if [ "$code" != "200" ]; then
+            echo "status=fail" >> "$GITHUB_OUTPUT"
+            echo "detail=readiness returned HTTP $code" >> "$GITHUB_OUTPUT"
+            echo "❌ readiness returned HTTP $code"
+            exit 0
           fi
+
+          # 2) completion probe via the shared script.
+          # The script always exits 0, writes status/detail/http_code to stdout
+          # and GITHUB_OUTPUT. Capture stdout so the same values are available for
+          # the status-summary log below (writing twice is idempotent in Actions).
+          probe_script=".sandcastle/scripts/probe_completion.sh"
+          if [ ! -f "$probe_script" ]; then
+            echo "status=fail" >> "$GITHUB_OUTPUT"
+            echo "detail=probe script missing: $probe_script" >> "$GITHUB_OUTPUT"
+            echo "❌ probe script missing: $probe_script"
+            exit 0
+          fi
+          if ! probe_out=$(
+            PROBE_BASE_URL="$base" PROBE_AUTH_TOKEN="$AUTH_TOKEN" PROBE_MODEL="$model" \
+            bash "$probe_script"
+          ); then
+            echo "status=fail" >> "$GITHUB_OUTPUT"
+            echo "detail=probe script crashed before emitting outputs" >> "$GITHUB_OUTPUT"
+            echo "❌ probe script crashed before emitting outputs"
+            exit 0
+          fi
+          printf '%s\n' "$probe_out" >> "$GITHUB_OUTPUT"
+          status=$(printf '%s\n' "$probe_out" | sed -n 's/^status=//p')
+          detail=$(printf '%s\n' "$probe_out" | sed -n 's/^detail=//p')
+          case "$status" in
+            ok)       echo "✅ proxy canary passed (readiness + completion)" ;;
+            degraded) echo "::warning::Proxy is up and authenticating, but upstream returned empty completions. Not paging."
+                      echo "⚠️ degraded: $detail" ;;
+            fail)     echo "❌ proxy canary: $detail" ;;
+          esac
 
       - name: Open or update the canary issue on failure
         if: steps.probe.outputs.status == 'fail'

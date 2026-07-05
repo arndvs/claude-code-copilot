@@ -1,14 +1,17 @@
 import type { CliArgs } from "./parse-cli-args.js";
-import { outputDirPath } from "./shell-helpers.js";
+import { outputDirPath, shFileInherit } from "./shell-helpers.js";
 import { join } from "node:path";
+import { StructuredOutputError } from "@ai-hero/sandcastle";
 
 export type WorkflowRunner = (opts: { args: CliArgs; repoDir: string; templatesDir: string }) => Promise<void>;
 
+const MERGE_PR_TIMEOUT_MS = 30 * 60 * 1000;
+
 const workflows: Record<string, WorkflowRunner> = {
-  "review-issue": async ({ args, repoDir, templatesDir }) => {
+  "review-issue": async ({ args, repoDir }) => {
     if (!args.issue) throw new Error("review-issue requires --issue <number>");
     const { runReviewIssue } = await import("../workflows/review-issue.js");
-    runReviewIssue({ issueNumber: args.issue, repoDir });
+    await runReviewIssue({ issueNumber: args.issue, repoDir });
   },
 
   "plan-issue": async ({ args, repoDir, templatesDir }) => {
@@ -31,12 +34,22 @@ const workflows: Record<string, WorkflowRunner> = {
     await runAddressReview({ prNumber: args.pr, repoDir, round: 1, maxRounds: 3 });
   },
 
+  "address-review": async ({ args, repoDir }) => {
+    if (!args.pr) throw new Error("address-review requires --pr <number>");
+    const round = parseRequiredPositiveInt(args.round, "--round");
+    const maxRounds = parseRequiredPositiveInt(args.maxRounds, "--max-rounds");
+    const { runAddressReview } = await import("../workflows/address-review.js");
+    await runAddressReview({ prNumber: args.pr, repoDir, round, maxRounds });
+  },
+
   "merge-pr": async ({ args, repoDir }) => {
     if (!args.pr) throw new Error("merge-pr requires --pr <number>");
-    const { execFileSync } = await import("node:child_process");
     const repo = process.env["GITHUB_REPOSITORY"];
     if (!repo) throw new Error("GITHUB_REPOSITORY environment variable is required");
-    execFileSync("gh", ["pr", "merge", args.pr, "--squash", "--delete-branch", "-R", repo], { cwd: repoDir, stdio: "inherit" });
+    shFileInherit("gh", ["pr", "merge", args.pr, "--squash", "--delete-branch", "-R", repo], {
+      cwd: repoDir,
+      timeout: MERGE_PR_TIMEOUT_MS,
+    });
   },
 
   "write-pr": async ({ args, repoDir, templatesDir }) => {
@@ -106,12 +119,43 @@ const workflows: Record<string, WorkflowRunner> = {
 
   "check-stale-prs": async ({ repoDir }) => {
     const { runCheckStalePrs } = await import("../workflows/check-stale-prs.js");
-    runCheckStalePrs({ repoDir });
+    await runCheckStalePrs({ repoDir });
   },
 };
 
 export const WORKFLOW_NAMES = Object.keys(workflows);
 
 export function resolveWorkflow(name: string): WorkflowRunner | undefined {
-  return workflows[name];
+  const runner = workflows[name];
+  return runner ? (opts) => runWorkflow(name, runner, opts) : undefined;
+}
+
+/** Wrap a workflow runner with centralised StructuredOutputError handling. */
+export async function runWorkflow(
+  name: string,
+  runner: WorkflowRunner,
+  opts: { args: CliArgs; repoDir: string; templatesDir: string },
+): Promise<void> {
+  try {
+    await runner(opts);
+  } catch (error) {
+    if (error instanceof StructuredOutputError) {
+      console.error(`[${name}] Failed: malformed agent output`);
+      console.error(`[${name}] Tag: <${error.tag}>`);
+      console.error(`[${name}] Raw matched: ${error.rawMatched ?? "(no match found)"}`);
+      if (error.cause) console.error(`[${name}] Cause:`, error.cause);
+      process.exitCode = 1;
+      return;
+    }
+    throw error;
+  }
+}
+
+function parseRequiredPositiveInt(value: string | undefined, flag: string): number {
+  if (!value) throw new Error(`address-review requires ${flag} <number>`);
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(`${flag} must be a positive integer`);
+  }
+  return parsed;
 }

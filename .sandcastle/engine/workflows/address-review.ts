@@ -6,7 +6,6 @@
  * ../lib/score-comment.ts. Keep tier/keyword policy in that scorer so the two paths stay aligned.
  */
 import path from "node:path";
-import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { run, claudeCode } from "@ai-hero/sandcastle";
 import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
@@ -20,6 +19,7 @@ import { resolvePrompt, configPromptArgs } from "../lib/resolve-prompt.js";
 import { resolveThreads } from "../lib/resolve-threads.js";
 import type { ScoredComment, Tier } from "../lib/types.js";
 import { resolveDefaultTemplatesDir } from "../lib/default-template-paths.js";
+import { shFile } from "../lib/shell-helpers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const defaultTemplatesDir = resolveDefaultTemplatesDir({ workflowDir: __dirname });
@@ -217,11 +217,7 @@ async function runAddressReviewRound(opts: AddressReviewOpts): Promise<Omit<Addr
 }
 
 function getBranch(opts: { prNumber: string; cwd: string }): string {
-  return execFileSync("gh", ["pr", "view", opts.prNumber, "--json", "headRefName", "--jq", ".headRefName"], {
-    encoding: "utf8",
-    cwd: opts.cwd,
-    stdio: ["ignore", "pipe", "pipe"],
-  }).trim();
+  return shFile("gh", ["pr", "view", opts.prNumber, "--json", "headRefName", "--jq", ".headRefName"], opts.cwd).trim();
 }
 
 interface AgentCommit {
@@ -265,11 +261,7 @@ function getAgentCommits(runResult: unknown): AgentCommit[] {
 
 function changedFilesForCommit(opts: { sha: string; cwd: string }): string[] {
   try {
-    const output = execFileSync("git", ["diff-tree", "--no-commit-id", "--name-only", "-r", opts.sha], {
-      encoding: "utf8",
-      cwd: opts.cwd,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const output = shFile("git", ["diff-tree", "--no-commit-id", "--name-only", "-r", opts.sha], opts.cwd);
     return output.split(/\r?\n/).filter(Boolean);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);

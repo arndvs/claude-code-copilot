@@ -1,6 +1,5 @@
-import { execFileSync } from "node:child_process";
 import { z } from "zod";
-import { sh, safeSh } from "./shell-helpers.js";
+import { sh, safeSh, shFile } from "./shell-helpers.js";
 
 const PrView = z.object({
   title: z.string(),
@@ -145,10 +144,7 @@ export function fetchPrComments(opts: { prNumber: string; cwd: string }): PrCont
       args.push("-F", `cursor=${cursor}`);
     }
 
-    const threadsJson = execFileSync("gh", args, {
-      encoding: "utf8",
-      cwd: opts.cwd,
-    });
+    const threadsJson = shFile("gh", args, opts.cwd);
     const page = ThreadsResponse.parse(JSON.parse(threadsJson));
     const { nodes, pageInfo } = page.data.repository.pullRequest.reviewThreads;
 
