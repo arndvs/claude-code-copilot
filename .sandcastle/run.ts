@@ -11,7 +11,6 @@ import { parseCli } from "./engine/lib/parse-cli-args.js";
 import { resolveWorkflow, WORKFLOW_NAMES } from "./engine/lib/dispatch.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const repoDir = path.resolve(__dirname, "..");
 const templatesDir = path.resolve(__dirname, "templates", "prompts");
 
 async function main(): Promise<void> {
@@ -27,6 +26,7 @@ async function main(): Promise<void> {
   }
 
   try {
+    const repoDir = args.repo ? path.resolve(args.repo) : path.resolve(__dirname, "..");
     await runner({ args, repoDir, templatesDir });
   } catch (error) {
     console.error(`[${args.workflow}] Failed:`, error);

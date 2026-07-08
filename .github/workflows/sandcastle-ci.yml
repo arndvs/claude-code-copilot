@@ -38,7 +38,7 @@ jobs:
       - name: Install engine dependencies (frozen)
         run: |
           cd .sandcastle/engine
-          pnpm install --frozen-lockfile
+          pnpm install --frozen-lockfile --ignore-workspace
 
       - name: Typecheck engine
         run: |
