@@ -154,6 +154,7 @@ export function validateTransition(
   if (triggerLabel) {
     const allowed = TRANSITIONS.get(triggerLabel);
     for (const label of adding) {
+      if (!LABELS[label]) continue;
       if (isStateMarker(label)) continue;
       if (!allowed?.has(label)) {
         errors.push(
