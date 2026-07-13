@@ -49,28 +49,39 @@ jobs:
           fi
           echo "Aliases under test:"; echo "$aliases" | sed 's/^/  /'
 
+          probe_script=".sandcastle/scripts/probe_completion.sh"
+          if [ ! -f "$probe_script" ]; then
+            echo "::error::Probe script missing: $probe_script"
+            exit 1
+          fi
+
           broken=""
           while IFS= read -r m; do
             [ -n "$m" ] || continue
-            # Retry to absorb transient empty-content blips from Copilot.
-            ok=no; code=000; has=no
-            for i in 1 2 3 4 5; do
-              code=$(curl -s -o /tmp/m.json -w '%{http_code}' --max-time 60 -X POST "$base/v1/messages" \
-                -H "Authorization: Bearer $AUTH_TOKEN" \
-                -H "anthropic-version: 2023-06-01" \
-                -H "content-type: application/json" \
-                -d "{\"model\":\"$m\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}" \
-                || true)
-              has=$(python3 -c "import json; d=json.load(open('/tmp/m.json')); print('yes' if d.get('content') else 'no')" 2>/dev/null || echo no)
-              if [ "$code" = "200" ] && [ "$has" = "yes" ]; then ok=yes; break; fi
-              sleep 4
-            done
-            if [ "$ok" = "yes" ]; then
-              echo "  ✅ $m"
-            else
-              echo "  ❌ $m (HTTP $code, content=$has)"
+            if ! probe_out=$(
+              GITHUB_OUTPUT= PROBE_BASE_URL="$base" PROBE_AUTH_TOKEN="$AUTH_TOKEN" PROBE_MODEL="$m" \
+              PROBE_PROMPT="ping" PROBE_RETRY_INTERVAL=4 bash "$probe_script"
+            ); then
+              echo "  ❌ $m (probe script crashed)"
               broken="$broken $m"
+              continue
             fi
+            status=$(printf '%s\n' "$probe_out" | sed -n 's/^status=//p')
+            detail=$(printf '%s\n' "$probe_out" | sed -n 's/^detail=//p')
+            http_code=$(printf '%s\n' "$probe_out" | sed -n 's/^http_code=//p')
+            case "$status" in
+              ok)
+                echo "  ✅ $m"
+                ;;
+              degraded)
+                echo "  ⚠️ $m (HTTP $http_code, $detail)"
+                broken="$broken $m"
+                ;;
+              *)
+                echo "  ❌ $m (HTTP $http_code, $detail)"
+                broken="$broken $m"
+                ;;
+            esac
           done <<< "$aliases"
 
           if [ -n "$broken" ]; then

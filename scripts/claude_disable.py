@@ -46,7 +46,16 @@ def main():
                     f.write('\n')
                 os.replace(tmp_path, str(settings_file))
             except BaseException:
-                os.unlink(tmp_path)
+                try:
+                    os.unlink(tmp_path)
+                except FileNotFoundError:
+                    pass
+                except OSError as cleanup_err:
+                    print(
+                        f"⚠️  Could not remove temp settings file {tmp_path}: {cleanup_err}. "
+                        "It may contain sensitive values — remove it manually.",
+                        file=sys.stderr,
+                    )
                 raise
             settings_file.chmod(0o600)
             print('✅ Proxy configuration removed.')

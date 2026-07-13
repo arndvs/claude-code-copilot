@@ -1,5 +1,5 @@
-import { execFileSync } from "node:child_process";
 import { appendFileSync } from "node:fs";
+import { shFile } from "../lib/shell-helpers.js";
 
 interface PullRequestSummary {
   number: number;
@@ -57,10 +57,10 @@ function isPositiveInteger(value: number): boolean {
 }
 
 function listOpenPullRequests(opts: { repo: string; repoDir: string }): PullRequestSummary[] {
-  const output = execFileSync(
+  const output = shFile(
     "gh",
     ["pr", "list", "--state", "open", "--limit", "1000", "--json", "number,title,updatedAt,url,isDraft,author", "-R", opts.repo],
-    { cwd: opts.repoDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    opts.repoDir,
   );
   return JSON.parse(output) as PullRequestSummary[];
 }

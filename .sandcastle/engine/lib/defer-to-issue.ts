@@ -1,7 +1,7 @@
-import { execFileSync } from "node:child_process";
 import type { ScoredComment } from "./types.js";
 import { resolveThread } from "./resolve-threads.js";
 import { postThreadReply } from "./post-review.js";
+import { shFile } from "./shell-helpers.js";
 
 interface PrContext {
   prNumber: string;
@@ -55,10 +55,10 @@ export function deferToIssue(opts: { scored: ScoredComment; pr: PrContext; threa
   }
 
   // Create the issue
-  const issueUrl = execFileSync(
+  const issueUrl = shFile(
     "gh",
     ["issue", "create", "--repo", `${pr.owner}/${pr.repo}`, "--title", title, "--body", body, "--label", "shft", "--label", "hitl"],
-    { encoding: "utf8", cwd },
+    cwd,
   ).trim();
 
   const issueNumber = parseIssueNumber(issueUrl);
@@ -80,10 +80,10 @@ function parseIssueNumber(issueUrl: string): number {
 
 function findExistingIssue(opts: { title: string; owner: string; repo: string; cwd: string }): { number: number; url: string } | null {
   try {
-    const result = execFileSync(
+    const result = shFile(
       "gh",
       ["issue", "list", "--repo", `${opts.owner}/${opts.repo}`, "--label", "shft,hitl", "--state", "open", "--search", opts.title, "--json", "number,url,title", "--limit", "5"],
-      { encoding: "utf8", cwd: opts.cwd },
+      opts.cwd,
     );
 
     const issues = JSON.parse(result) as Array<{ number: number; url: string; title: string }>;

@@ -3,6 +3,9 @@ export interface CliArgs {
   issue?: string;
   issueTitle?: string;
   pr?: string;
+  repo?: string;
+  round?: string;
+  maxRounds?: string;
   branch?: string;
   baseRef?: string;
   prdNumber?: string;
@@ -16,6 +19,9 @@ const flagsRequiringValues = new Map<string, keyof Omit<CliArgs, "workflow" | "d
   ["--issue", "issue"],
   ["--issue-title", "issueTitle"],
   ["--pr", "pr"],
+  ["--repo", "repo"],
+  ["--round", "round"],
+  ["--max-rounds", "maxRounds"],
   ["--branch", "branch"],
   ["--base-ref", "baseRef"],
   ["--prd-number", "prdNumber"],
@@ -26,7 +32,7 @@ const flagsRequiringValues = new Map<string, keyof Omit<CliArgs, "workflow" | "d
 
 export function parseCli(argv: string[]): CliArgs {
   if (argv.length === 0) {
-    throw new Error("Missing workflow name. Usage: run.ts <workflow-name> [--issue N] [--issue-title TEXT] [--pr N] [--branch REF] [--base-ref REF] [--prd-number N] [--prd-title TEXT] [--sub-issue-number N] [--sub-issue-title TEXT] [--dry-run]");
+    throw new Error("Missing workflow name. Usage: run.ts <workflow-name> [--issue N] [--issue-title TEXT] [--pr N] [--repo PATH] [--round N] [--max-rounds N] [--branch REF] [--base-ref REF] [--prd-number N] [--prd-title TEXT] [--sub-issue-number N] [--sub-issue-title TEXT] [--dry-run]");
   }
 
   const workflow = argv[0]!;

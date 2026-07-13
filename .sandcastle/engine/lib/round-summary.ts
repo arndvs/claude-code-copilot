@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { shFile } from "./shell-helpers.js";
 import type { Tier } from "./types.js";
 
 interface CommentResult {
@@ -54,11 +54,7 @@ export function postRoundSummary(opts: RoundSummaryOpts): void {
   const body = lines.join("\n");
 
   try {
-    execFileSync("gh", ["pr", "comment", prNumber, "--repo", `${owner}/${repo}`, "--body", body], {
-      encoding: "utf8",
-      cwd,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    shFile("gh", ["pr", "comment", prNumber, "--repo", `${owner}/${repo}`, "--body", body], cwd);
     console.log(`Posted round ${round} summary on PR #${prNumber}`);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
