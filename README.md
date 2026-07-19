@@ -322,7 +322,7 @@ Three automated workflows keep the hosted proxy honest — they run on GitHub Ac
 
 | Workflow | Schedule | On failure |
 |---|---|---|
-| **Proxy canary** | Every 30 min | Opens a `🚨 Proxy canary failing` issue labeled `proxy-canary` |
+| **Proxy canary** | Every 10 min | Opens a `🚨 Proxy canary failing` issue labeled `proxy-canary` |
 | **Model health** | Daily 13:00 UTC | Opens a `⚠️ Model health: configured alias(es) failing through the proxy` issue labeled `model-health` |
 | **CI** | On every push/PR | Fails the check — blocks merging |
 

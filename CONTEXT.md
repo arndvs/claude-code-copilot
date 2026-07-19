@@ -78,7 +78,7 @@ Three workflows under `.github/workflows/`:
 | Workflow | Trigger | What it does |
 |---|---|---|
 | `ci.yml` | push to `dev`/`main`, all PRs | Security tests (`test_security.sh`), YAML parse, compose config validation (base + db overlay), Docker build, ShellCheck |
-| `proxy-canary.yml` | every 30 min (`*/30 * * * *`) + manual | Probes hosted proxy: readiness check then a real `/v1/messages` completion. Hard failures (auth/5xx/unreachable) → opens issue. Empty content after retries → **warning, not failure** (transient Copilot quirk) |
+| `proxy-canary.yml` | every 10 min (`*/10 * * * *`) + manual | Probes hosted proxy: readiness check then a real `/v1/messages` completion. Hard failures (auth/5xx/unreachable) → opens issue. Empty content after retries → **warning, not failure** (transient Copilot quirk) |
 | `model-health.yml` | daily 13:00 UTC + manual | Extracts every explicit alias from `litellm_config.yaml`, sends a completion through the proxy for each. Failing aliases → auto-opens/updates a `model-health` issue |
 
 **Proxy-canary detail.** Retries up to 5 times with 6 s sleep between attempts. Distinguishes hard errors (401/403/400/5xx/unreachable) from the Copilot empty-content quirk. On persistent empty content the job sets `status=degraded` and emits a GitHub Actions warning — the proxy is verified as up and authenticating, so it does not page.

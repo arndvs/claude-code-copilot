@@ -7,5 +7,6 @@
   "contextDoc": "CONTEXT.md",
   "adrDir": "docs/adr",
   "packageManager": "pnpm",
-  "proxy": true
+  "proxy": true,
+  "proxyCanary": true
 }
