@@ -1,7 +1,8 @@
 #!/usr/bin/env tsx
 /**
  * Sandcastle dispatcher — single entry point for all workflow runners.
- * Workflow YAMLs call: ./.sandcastle/engine/node_modules/.bin/tsx .sandcastle/run.ts <workflow-name> [flags]
+ * Workflow YAMLs run from .sandcastle/engine with: pnpm --ignore-workspace exec tsx ../run.ts <workflow-name> [flags]
+ * .sandcastle/package.json pins this dispatcher to ESM regardless of the host repo package type.
  * Supported flags are parsed centrally in engine/lib/parse-cli-args.ts.
  */
 
