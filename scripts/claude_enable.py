@@ -94,17 +94,24 @@ def main():
     env = settings.get('env', {})
     if not isinstance(env, dict):
         env = {}
-    env.update({
+    # Build the exact dict of keys this script writes, then validate it against
+    # the manifest before merging — a runtime check (not `assert`, which is
+    # skipped under `python -O`) so an undeclared key fails loudly instead of
+    # silently leaving claude_disable.py unable to remove it.
+    proxy_env = {
         'ANTHROPIC_BASE_URL': base_url,
         'ANTHROPIC_AUTH_TOKEN': master_key,
         # Keeps behavior consistent across providers (disables extended thinking)
         'CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS': '1',
-    })
-    # Guard: every key we write must be declared in the manifest.
-    assert set(env) & set(PROXY_ENV_KEYS) == set(PROXY_ENV_KEYS), (
-        "claude_enable.py writes keys not declared in PROXY_ENV_KEYS — "
-        "update the manifest in proxy_status.py (CONTEXT.md §1)."
-    )
+    }
+    undeclared = set(proxy_env) - set(PROXY_ENV_KEYS)
+    if undeclared:
+        raise RuntimeError(
+            "claude_enable.py writes keys not declared in PROXY_ENV_KEYS: "
+            f"{sorted(undeclared)} — update the manifest in proxy_status.py "
+            "(CONTEXT.md §1)."
+        )
+    env.update(proxy_env)
     settings['env'] = env
 
     fd, tmp_path = tempfile.mkstemp(
