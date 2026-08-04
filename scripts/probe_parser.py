@@ -37,11 +37,12 @@ def _is_sse(body: str) -> bool:
 def _sse_has_content(body: str) -> bool:
     """True if an SSE body contains a content_block_delta with text."""
     for line in body.splitlines():
-        if line.startswith("data:") and line.rstrip("\r\n") not in (
+        stripped = line.lstrip()
+        if stripped.startswith("data:") and stripped.rstrip("\r\n") not in (
             "data: [DONE]",
             "data:[DONE]",
         ):
-            raw = line[5:].lstrip(" ")
+            raw = stripped[5:].lstrip(" ")
             try:
                 d = json.loads(raw)
             except Exception:
