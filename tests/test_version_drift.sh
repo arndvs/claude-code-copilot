@@ -67,10 +67,13 @@ VERSION=$(tr -d '[:space:]' < "$VERSION_FILE" 2>/dev/null || echo "")
 if [ -n "$VERSION" ]; then
     # Find any hardcoded litellm[proxy]==X.Y.Z pins that don't match the file.
     # Consumers that read .litellm-version use ${LITELLM_VERSION} or $(cat ...),
-    # so a literal ==<semver> pin is a drift signal.
+    # so a literal ==<semver> pin is a drift signal. Filter on the full
+    # "litellm[proxy]==<version>" string with an exact line match (-x) so a
+    # pinned version that is a prefix of another (e.g. 1.89.1 vs 1.89.10) is
+    # still flagged as drift.
     drift=$(grep -RhoE 'litellm\[proxy\]==[0-9]+\.[0-9]+\.[0-9]+' \
         Dockerfile Makefile start_proxy.sh 2>/dev/null \
-        | grep -Fv "==${VERSION}" || true)
+        | grep -Fxv "litellm[proxy]==${VERSION}" || true)
     if [ -n "$drift" ]; then
         fail "Hardcoded litellm version(s) diverge from .litellm-version: $drift"
     else

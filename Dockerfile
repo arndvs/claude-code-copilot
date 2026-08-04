@@ -6,7 +6,7 @@ FROM python:3.12-slim
 # patches; for a fully frozen artifact, deploy the prebuilt ECR image (see
 # docs/hosted_deployment.md) instead of rebuilding on the box.
 #
-# The LiteLLM version is single-sourced from .litellm-version (refs #111) so a
+# The LiteLLM version is single-sourced from .litellm-version (refs #126) so a
 # bump updates Docker, Makefile, and start_proxy.sh together.
 COPY .litellm-version .
 RUN LITELLM_VERSION="$(cat .litellm-version)" && \
