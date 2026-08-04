@@ -112,15 +112,16 @@ router_settings:
   retry_after: 2
   allowed_fails: 3
   cooldown_time: 30
+  # LiteLLM expects fallbacks as a LIST of dicts: [{model: [fallback, ...]}]
   fallbacks:
-    claude-sonnet-4-6:
-      - claude-sonnet-4-6-fallback
-    claude-haiku-4-5-20251001:
-      - claude-haiku-4-5-20251001-fallback
-    claude-opus-4-6:
-      - claude-opus-4-6-fallback
-    claude-opus-4-7:
-      - claude-opus-4-7-fallback
-    "*":
-      - "*-fallback"
+    - claude-sonnet-4-6:
+        - claude-sonnet-4-6-fallback
+    - claude-haiku-4-5-20251001:
+        - claude-haiku-4-5-20251001-fallback
+    - claude-opus-4-6:
+        - claude-opus-4-6-fallback
+    - claude-opus-4-7:
+        - claude-opus-4-7-fallback
+    - "*":
+        - "*-fallback"
 
