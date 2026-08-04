@@ -21,6 +21,8 @@ Primary entries carry the four editor headers Copilot validates; fallback entrie
 
 **Proxy settings.** `drop_params: true` and `additional_drop_params: ["response_format", "thinking"]` are global `litellm_settings` that silently strip parameters the upstream doesn't support. `json_logs: true` enables structured proxy logs, and `callbacks: ["litellm_logger.proxy_handler_instance", "health_version.version_callback_instance"]` registers the metadata logger plus health/version route callback. `stream: true` is set in `litellm_params` on every route to reduce empty-content 200s from the Anthropic adapter — streaming delivers chunks incrementally and avoids the adapter race where a non-streamed response can return empty content.
 
+**Settings-block contract.** The three settings blocks carry safety-critical config and are enforced by `tests/test_settings_contract.py` (refs #119): `drop_params` must be boolean `true`, `additional_drop_params` a list of strings, `callbacks` a non-empty list whose module paths resolve to existing files at the repo root, `general_settings.master_key` an `os.environ/...` reference, and `router_settings.num_retries` a positive int matching `litellm_settings.num_retries`. No unknown top-level keys are allowed. This is the executable contract for the settings blocks, mirroring the `model_list` contract in `test_model_entry_contract.py` (refs #80).
+
 ## 2. DB-less default mode
 
 `docker-compose.yml` runs proxy-only — no database, no extra containers.
