@@ -77,7 +77,7 @@ def _config_model_map(config: dict) -> dict[str, str]:
     result: dict[str, str] = {}
     for entry in model_list:
         name = entry.get("model_name", "")
-        if name.endswith("-fallback"):
+        if isinstance(name, str) and name.endswith("-fallback"):
             continue
         result[name] = entry["litellm_params"]["model"]
     return result
