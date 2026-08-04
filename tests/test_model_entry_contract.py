@@ -144,20 +144,36 @@ class TestModelEntryContract:
         The whole point of the dual-provider setup is resilience: if Copilot
         fails, the router falls back to OpenRouter. A primary without a fallback
         silently loses that resilience.
+
+        LiteLLM expects ``router_settings.fallbacks`` as a LIST of dicts, e.g.
+        ``[{"claude-sonnet-4-6": ["claude-sonnet-4-6-fallback"]}]``.
         """
         model_list = _model_list(config)
-        fallbacks = config.get("router_settings", {}).get("fallbacks", {})
-        assert isinstance(fallbacks, dict), "router_settings.fallbacks must be a mapping"
+        fallbacks = config.get("router_settings", {}).get("fallbacks", [])
+        assert isinstance(fallbacks, list), (
+            "router_settings.fallbacks must be a list of dicts "
+            "(LiteLLM format: [{model: [fallback, ...]}])"
+        )
+
+        # Flatten the list-of-dicts into a single model -> [fallbacks] map.
+        fallback_map: dict[str, list[str]] = {}
+        for item in fallbacks:
+            assert isinstance(item, dict), (
+                f"router_settings.fallbacks item {item!r} is not a dict; "
+                f"expected LiteLLM format [{model: [fallback, ...]}]"
+            )
+            for model, fb_list in item.items():
+                fallback_map[model] = fb_list
 
         for entry in model_list:
             name = entry.get("model_name", "<unnamed>")
             if _is_fallback(name) or name == "*":
                 continue
-            assert name in fallbacks, (
+            assert name in fallback_map, (
                 f"Primary model '{name}' has no entry in router_settings.fallbacks; "
                 f"it will not fall back to OpenRouter on Copilot failure (CONTEXT.md §1)."
             )
-            fb_list = fallbacks[name]
+            fb_list = fallback_map[name]
             assert isinstance(fb_list, list) and fb_list, (
                 f"Primary model '{name}' has an empty fallbacks list (CONTEXT.md §1)."
             )
