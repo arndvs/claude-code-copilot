@@ -95,7 +95,7 @@ def main():
     env.update({
         'ANTHROPIC_BASE_URL': base_url,
         'ANTHROPIC_AUTH_TOKEN': master_key,
-        # Required — Copilot doesn't support extended thinking
+        # Keeps behavior consistent across providers (disables extended thinking)
         'CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS': '1',
     })
     settings['env'] = env

@@ -1,30 +1,25 @@
 # CONTEXT.md — claude-code-copilot
 
-## 1. LiteLLM → Copilot routing
+## 1. LiteLLM → Copilot routing (with OpenRouter fallback)
 
 LiteLLM translates Anthropic Messages API calls into GitHub Copilot API calls.
 `litellm_config.yaml` maps Claude Code's hyphenated model names to Copilot's dotted names.
+Each alias has a **primary** (GitHub Copilot) and a **fallback** (OpenRouter) deployment,
+wired via `router_settings.fallbacks` so the proxy stays up if Copilot fails.
 
-| Alias (Claude Code sends) | Target (Copilot receives) |
-|---|---|
-| `claude-sonnet-4-6` | `github_copilot/claude-opus-4.8` |
-| `claude-haiku-4-5-20251001` | `github_copilot/claude-opus-4.8` (Copilot has no Haiku) |
-| `claude-opus-4-6` | `github_copilot/claude-opus-4.6` |
-| `claude-opus-4-7` | `github_copilot/claude-opus-4.7` |
-| `*` (wildcard) | `github_copilot/*` — catch-all pass-through |
+| Alias (Claude Code sends) | Primary (Copilot) | Fallback (OpenRouter) |
+|---|---|---|
+| `claude-sonnet-4-6` | `github_copilot/claude-opus-4.8` | `openrouter/deepseek/deepseek-v4-flash-0731` |
+| `claude-haiku-4-5-20251001` | `github_copilot/claude-opus-4.8` (Copilot has no Haiku) | `openrouter/deepseek/deepseek-v4-flash-0731` |
+| `claude-opus-4-6` | `github_copilot/claude-opus-4.6` | `openrouter/deepseek/deepseek-v4-flash-0731` |
+| `claude-opus-4-7` | `github_copilot/claude-opus-4.7` | `openrouter/deepseek/deepseek-v4-flash-0731` |
+| `*` (wildcard) | `github_copilot/*` — catch-all pass-through | `openrouter/*` |
 
-Every model entry carries four required editor headers that Copilot validates:
+Primary entries carry the four editor headers Copilot validates; fallback entries carry an `api_key` referencing the OpenRouter key from the environment.
 
-| Header | Value |
-|---|---|
-| `Editor-Version` | `vscode/1.106.3` |
-| `Editor-Plugin-Version` | `copilot/1.388.0` |
-| `Copilot-Integration-Id` | `vscode-chat` |
-| `User-Agent` | `GithubCopilot/1.388.0` |
+**Auth boundary.** `general_settings.master_key` reads from `LITELLM_MASTER_KEY` env var. Claude Code authenticates to LiteLLM with this key; LiteLLM authenticates to Copilot with the OAuth token cached at `~/.config/litellm/github_copilot/`, and to OpenRouter with `OPENROUTER_API_KEY`. The credentials never cross.
 
-**Auth boundary.** `general_settings.master_key` reads from `LITELLM_MASTER_KEY` env var. Claude Code authenticates to LiteLLM with this key; LiteLLM authenticates to Copilot with the OAuth token cached at `~/.config/litellm/github_copilot/`. The two credentials never cross.
-
-**Proxy settings.** `drop_params: true` and `additional_drop_params: ["response_format", "thinking"]` are global `litellm_settings` that silently strip parameters Copilot doesn't support. `json_logs: true` enables structured proxy logs, and `callbacks: ["litellm_logger.proxy_handler_instance", "health_version.version_callback_instance"]` registers the metadata logger plus health/version route callback. `stream: true` is set in `litellm_params` on every route to reduce empty-content 200s from the Anthropic adapter — streaming delivers chunks incrementally and avoids the adapter race where a non-streamed response can return empty content.
+**Proxy settings.** `drop_params: true` and `additional_drop_params: ["response_format", "thinking"]` are global `litellm_settings` that silently strip parameters the upstream doesn't support. `json_logs: true` enables structured proxy logs, and `callbacks: ["litellm_logger.proxy_handler_instance", "health_version.version_callback_instance"]` registers the metadata logger plus health/version route callback. `stream: true` is set in `litellm_params` on every route to reduce empty-content 200s from the Anthropic adapter — streaming delivers chunks incrementally and avoids the adapter race where a non-streamed response can return empty content.
 
 ## 2. DB-less default mode
 
@@ -78,10 +73,10 @@ Three workflows under `.github/workflows/`:
 | Workflow | Trigger | What it does |
 |---|---|---|
 | `ci.yml` | push to `dev`/`main`, all PRs | Security tests (`test_security.sh`), YAML parse, compose config validation (base + db overlay), Docker build, ShellCheck |
-| `proxy-canary.yml` | every 30 min (`*/30 * * * *`) + manual | Probes hosted proxy: readiness check then a real `/v1/messages` completion. Hard failures (auth/5xx/unreachable) → opens issue. Empty content after retries → **warning, not failure** (transient Copilot quirk) |
+| `proxy-canary.yml` | every 30 min (`*/30 * * * *`) + manual | Probes hosted proxy: readiness check then a real `/v1/messages` completion. Hard failures (auth/5xx/unreachable) → opens issue. Empty content after retries → **warning, not failure** (transient upstream quirk) |
 | `model-health.yml` | daily 13:00 UTC + manual | Extracts every explicit alias from `litellm_config.yaml`, sends a completion through the proxy for each. Failing aliases → auto-opens/updates a `model-health` issue |
 
-**Proxy-canary detail.** Retries up to 5 times with 6 s sleep between attempts. Distinguishes hard errors (401/403/400/5xx/unreachable) from the Copilot empty-content quirk. On persistent empty content the job sets `status=degraded` and emits a GitHub Actions warning — the proxy is verified as up and authenticating, so it does not page.
+**Proxy-canary detail.** Retries up to 5 times with 6 s sleep between attempts. Distinguishes hard errors (401/403/400/5xx/unreachable) from the upstream empty-content quirk. On persistent empty content the job sets `status=degraded` and emits a GitHub Actions warning — the proxy is verified as up and authenticating, so it does not page.
 
 **Model-health detail.** Parses `litellm_config.yaml` with PyYAML to extract all non-wildcard aliases. Each alias is probed with 5 retries (4 s apart). Failing aliases are collected and reported in a `model-health` labeled issue. Guards against false greens: if YAML parsing yields zero aliases, the job fails immediately.
 

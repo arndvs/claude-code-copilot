@@ -1,18 +1,17 @@
 # claude-code-copilot
 
-Route Claude Code through your GitHub Copilot subscription via a secure LiteLLM proxy (local or hosted). No separate Anthropic API key required.
+Route Claude Code through your GitHub Copilot subscription via a secure LiteLLM proxy (local or hosted), with OpenRouter as an automatic fallback. No separate Anthropic API key required for the primary path.
 
 ```
-Claude Code → LiteLLM proxy (local or hosted) → GitHub Copilot API
+Claude Code → LiteLLM proxy (local or hosted) → GitHub Copilot API (primary)
+                                                └→ OpenRouter API (fallback)
 ```
 
 ## Why this exists
 
-GitHub Copilot subscriptions include access to Claude, GPT-4o, and other models — but only through GitHub's API. Claude Code expects the Anthropic Messages API. This proxy bridges that gap: it accepts Anthropic-format requests and translates them to GitHub Copilot's API, letting you run Claude Code against your existing Copilot subscription without paying for a separate Anthropic API key.
+GitHub Copilot subscriptions include access to Claude, GPT-4o, and other models — but only through GitHub's API. Claude Code expects the Anthropic Messages API. This proxy bridges that gap: it accepts Anthropic-format requests and translates them to GitHub Copilot's API, letting you run Claude Code against your existing Copilot subscription without paying for a separate Anthropic API key. If Copilot is unavailable or rate-limited, the proxy automatically falls back to OpenRouter so your agents keep working.
 
-For startup teams, this setup may help align AI dev spend with existing Azure-backed startup funding, depending on the current Microsoft for Startups program, region, and GitHub organization billing setup. Treat any use of startup credits for Copilot seats or related GitHub billing as eligibility-dependent, and confirm the current terms before relying on this path. See [Microsoft for Startups overview](https://learn.microsoft.com/en-us/startups/microsoft-for-startups/overview).
-
-This is the **infrastructure layer** for [ctrlshft](https://github.com/arndvs/ctrlshft) — a dotfiles-based operating system for autonomous AI coding agents. The `shft` CLI manages this proxy as a daemon, injecting `ANTHROPIC_BASE_URL` into every Claude session (interactive and autonomous) so all model requests route through Copilot.
+This is the **infrastructure layer** for [ctrlshft](https://github.com/arndvs/ctrlshft) — a dotfiles-based operating system for autonomous AI coding agents. The `shft` CLI manages this proxy as a daemon, injecting `ANTHROPIC_BASE_URL` into every Claude session (interactive and autonomous) so all model requests route through the proxy.
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -24,10 +23,9 @@ This is the **infrastructure layer** for [ctrlshft](https://github.com/arndvs/ct
 │  claude-code-copilot (this repo — the proxy)            │
 │  ├── LiteLLM translates Anthropic API → Copilot API    │
 │  ├── OAuth token cached, model names mapped             │
-│  └── Wildcard routing — any model forwarded             │
+│  └── OpenRouter fallback when Copilot fails             │
 ├─────────────────────────────────────────────────────────┤
-│  GitHub Copilot API                                     │
-│  └── Claude, GPT-4o, Gemini via your subscription      │
+│  GitHub Copilot API (primary) / OpenRouter (fallback)   │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -38,7 +36,8 @@ This is the **infrastructure layer** for [ctrlshft](https://github.com/arndvs/ct
 
 ## Prerequisites
 
-- [GitHub Copilot](https://github.com/features/copilot) subscription
+- [GitHub Copilot](https://github.com/features/copilot) subscription (primary)
+- An [OpenRouter](https://openrouter.ai) account and API key (fallback)
 - [uv](https://docs.astral.sh/uv/) — installed automatically by `make setup` if missing
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — `make install-claude` if needed
 
@@ -54,10 +53,13 @@ cd claude-code-copilot
 # 2. Generate keys and check dependencies
 make setup
 
-# 3. Point Claude Code at the proxy
+# 3. Add your OpenRouter API key to .env (fallback)
+#    OPENROUTER_API_KEY=sk-or-...
+
+# 4. Point Claude Code at the proxy
 make claude-enable
 
-# 4. Start the proxy (GitHub OAuth on first run)
+# 5. Start the proxy (GitHub OAuth on first run)
 make start
 ```
 
@@ -75,14 +77,12 @@ claude
 | Command | Description |
 |---|---|
 | `make setup` | Generate `.env` with random keys, install `uv` if missing |
-| `make start` | Start LiteLLM proxy (GitHub OAuth on first run) |
+| `make start` | Start LiteLLM proxy |
 | `make stop` | Stop the proxy |
 | `make test` | Verify proxy is working |
 | `make claude-enable` | Configure Claude Code to use the configured proxy endpoint |
 | `make claude-disable` | Restore Claude Code to Anthropic direct |
 | `make claude-status` | Show current Claude Code configuration |
-| `make list-models` | List all available GitHub Copilot models |
-| `make list-models-enabled` | List only enabled models |
 | `make install-claude` | Install Claude Code CLI via npm |
 
 ---
@@ -96,6 +96,7 @@ All config lives in `.env` (generated by `make setup`):
 | `LITELLM_MASTER_KEY` | Auth token for the proxy — any `sk-` prefixed string |
 | `LITELLM_PORT` | Proxy port (default: `4000`) |
 | `LITELLM_LOCAL_MODEL_COST_MAP` | Set `true` to use local cost map (avoids remote fetch that can fail behind corporate proxies) |
+| `OPENROUTER_API_KEY` | OpenRouter API key — used for the fallback upstream when Copilot is unavailable |
 | `PROXY_BASE_URL` | Optional Claude Code endpoint for hosted deployments, such as `https://proxy.example.com` |
 
 ### Persistent Claude Code config
@@ -114,7 +115,7 @@ Set `ANTHROPIC_BASE_URL` to your proxy endpoint (`http://localhost:4000` for loc
 }
 ```
 
-> `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1` is required — GitHub Copilot doesn't support Anthropic's extended thinking feature and returns errors without it.
+> `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1` disables Anthropic's extended thinking feature, which keeps behavior consistent across providers.
 
 ### VS Code
 
@@ -132,29 +133,20 @@ Set `ANTHROPIC_BASE_URL` to your proxy endpoint (`http://localhost:4000` for loc
 
 ## Model selection
 
-`litellm_config.yaml` defines explicit aliases for the common Claude Code model names (e.g. `claude-sonnet-4-6`, `claude-opus-4-7`) plus a `model_name: "*"` wildcard that forwards any other name straight to GitHub Copilot. Claude Code's default model selection works without changes.
-
-To see what models your Copilot plan supports:
-
-```bash
-make list-models
-make list-models-enabled   # only models with active policy
-```
+`litellm_config.yaml` defines explicit aliases for the common Claude Code model names (e.g. `claude-sonnet-4-6`, `claude-opus-4-7`) plus a `model_name: "*"` wildcard. Each alias has a **primary** (GitHub Copilot) and a **fallback** (OpenRouter) deployment, wired via `router_settings.fallbacks`. Claude Code's default model selection works without changes.
 
 To specify a model explicitly:
 
 ```bash
 claude --model claude-sonnet-4-6
 claude --model claude-opus-4-7
-claude --model gpt-4o
 ```
 
-> **Note:** not every model is reachable through this proxy. Models served only
-> via Copilot's Responses API (for example, GPT-5.x Codex variants) will reject
-> `/v1/messages` chat-completion calls. If a specific model is intermittently
-> unreliable on your plan, you can remap its alias to a more dependable model in
-> `litellm_config.yaml`. See
-> [docs/hosted_deployment.md](docs/hosted_deployment.md#model-selection-note).
+> **Note:** the primary path uses your GitHub Copilot subscription. The OpenRouter
+> fallback currently routes to `deepseek/deepseek-v4-flash-0731`. To change the
+> fallback model, edit the fallback entry's `model:` value in `litellm_config.yaml`
+> to any OpenRouter model ID your key can access (e.g. `anthropic/claude-sonnet-4-5`).
+> See [docs/hosted_deployment.md](docs/hosted_deployment.md#model-selection-note).
 
 ---
 
@@ -187,7 +179,7 @@ curl -q -X POST "${PROXY_BASE_URL}/v1/messages" \
 make start
 # Complete OAuth, then Ctrl-C
 
-# Run in Docker (mounts your cached token)
+# Run in Docker (mounts your cached Copilot token; reads OPENROUTER_API_KEY from .env)
 docker build -t claude-code-copilot .
 docker run --env-file .env \
   -v "$HOME/.config/litellm/github_copilot:/root/.config/litellm/github_copilot:rw" \
@@ -289,7 +281,7 @@ export CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1
 
 Copilot's limits are designed for interactive use. Autonomous loops consume quota significantly faster — expect to exhaust limits mid-month on standard plans with heavy use.
 
-**Mitigation:** add Azure OpenAI as a fallback in `litellm_config.yaml`:
+**Mitigation:** the proxy routes to **OpenRouter as an automatic fallback** when Copilot fails or rate-limits. Configure the fallback in `litellm_config.yaml`:
 
 ```yaml
 model_list:
@@ -302,14 +294,11 @@ model_list:
         Editor-Plugin-Version: "copilot/1.388.0"
         Copilot-Integration-Id: "vscode-chat"
         User-Agent: "GithubCopilot/1.388.0"
-
-  # Fallback — Azure OpenAI (uncomment when quota available)
-  # - model_name: "*"
-  #   litellm_params:
-  #     model: "os.environ/AZURE_OPENAI_DEPLOYMENT"
-  #     api_key: "os.environ/AZURE_OPENAI_API_KEY"
-  #     api_base: "os.environ/AZURE_OPENAI_ENDPOINT"
-  #     api_version: "os.environ/AZURE_OPENAI_API_VERSION"
+  # Fallback — OpenRouter
+  - model_name: "*-fallback"
+    litellm_params:
+      model: "openrouter/*"
+      api_key: "os.environ/OPENROUTER_API_KEY"
 ```
 
 **Note:** Multiple `model_list` entries alone do not enable automatic fallback. LiteLLM requires explicit [`fallbacks:` router configuration](https://docs.litellm.ai/docs/routing#fallbacks) to retry on a different deployment when Copilot rate limits are hit.
@@ -340,7 +329,7 @@ docker logs sandcastle-proxy 2>&1 | grep PROXY_LOG
 # PROXY_LOG {"t": "proxy_log", "status": "success", "model": "claude-opus-4.8", "call_type": "anthropic_messages", "stream": true, "ms": 1342, "finish": "end_turn", "content_len": 31, "completion_tokens": 16, "upstream_empty": false, "http_status": 200}
 ```
 
-To spot empty-content events (upstream Copilot returning 200 with no content):
+To spot empty-content events (upstream returning 200 with no content):
 
 ```bash
 docker logs sandcastle-proxy 2>&1 | grep '"upstream_empty": true'
@@ -403,6 +392,15 @@ rm -rf ~/.config/litellm/github_copilot
 make start
 ```
 
+### OpenRouter API key invalid or missing (fallback)
+
+```bash
+# Confirm the key is set and works
+grep OPENROUTER_API_KEY .env
+curl -s https://openrouter.ai/api/v1/models -H "Authorization: Bearer $OPENROUTER_API_KEY" | head -c 200
+# If you rotated the key, update .env and recreate the container (not restart)
+```
+
 ### Extended thinking errors
 
 Ensure `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1` is set. Run `make claude-enable` to set it automatically.
@@ -430,18 +428,18 @@ litellm_settings:
 ## How it works
 
 `litellm_config.yaml` defines explicit model aliases plus a `model_name: "*"`
-wildcard. Requests are forwarded to GitHub Copilot with the editor headers the
-Copilot API expects from an IDE client. LiteLLM translates between Anthropic's
-`/v1/messages` format and GitHub Copilot's API. (As noted above, this is an
-unofficial integration — review the Copilot Terms of Service before production
-use.)
+wildcard. Each alias has a **primary** deployment that forwards to GitHub Copilot
+(with the editor headers the Copilot API expects) and a **fallback** deployment
+that forwards to OpenRouter (authenticated with `OPENROUTER_API_KEY`).
+`router_settings.fallbacks` wires them so the proxy retries on OpenRouter when
+Copilot fails or rate-limits. LiteLLM translates between Anthropic's
+`/v1/messages` format and each provider's API.
 
 ---
 
 ## Related
 
 - [ctrlshft](https://github.com/arndvs/ctrlshft) — dotfiles for AI coding agents; manages this proxy as infrastructure
-- [kjetiljd/claude-code-over-github-copilot](https://github.com/kjetiljd/claude-code-over-github-copilot) — original inspiration
-- [NationalBankBelgium/litellm-claude-code-proxy](https://github.com/NationalBankBelgium/litellm-claude-code-proxy) — same pattern for Azure AI Foundry
 - [LiteLLM GitHub Copilot provider](https://docs.litellm.ai/docs/providers/github_copilot)
+- [LiteLLM OpenRouter provider](https://docs.litellm.ai/docs/providers/openrouter)
 - [Claude Code LLM gateway docs](https://docs.anthropic.com/en/docs/claude-code/llm-gateway)

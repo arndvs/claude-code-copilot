@@ -1,4 +1,4 @@
-.PHONY: help setup start stop test test-stream claude-enable claude-disable claude-status list-models list-models-enabled install-claude
+.PHONY: help setup start stop test test-stream claude-enable claude-disable claude-status install-claude
 
 PORT ?= 4000
 
@@ -7,7 +7,7 @@ help:
 	@echo "claude-code-copilot"
 	@echo "─────────────────────────────────────────"
 	@echo "  make setup               Set up .env with generated keys"
-	@echo "  make start               Start LiteLLM proxy (OAuth on first run)"
+	@echo "  make start               Start LiteLLM proxy (Copilot primary, OpenRouter fallback)"
 	@echo "  make stop                Stop the proxy"
 	@echo "  make test                Test proxy is working (non-streaming)"
 	@echo "  make test-stream         Test proxy streaming (SSE) response"
@@ -15,9 +15,6 @@ help:
 	@echo "  make claude-enable       Point Claude Code at local proxy"
 	@echo "  make claude-disable      Restore Claude Code to Anthropic direct"
 	@echo "  make claude-status       Show current Claude Code config"
-	@echo ""
-	@echo "  make list-models         List all available Copilot models"
-	@echo "  make list-models-enabled List only enabled Copilot models"
 	@echo ""
 	@echo "  make install-claude      Install Claude Code CLI via npm"
 	@echo ""
@@ -58,7 +55,7 @@ start:
 	@if [ ! -f .env ]; then echo "❌ .env not found. Run 'make setup' first."; exit 1; fi
 	@set -a && . ./.env && set +a && \
 	PORT=$${LITELLM_PORT:-$(PORT)} && \
-	echo "Starting LiteLLM → GitHub Copilot proxy on port $$PORT..." && \
+	echo "Starting LiteLLM → OpenRouter proxy on port $$PORT..." && \
 	UV_NATIVE_TLS=$${UV_NATIVE_TLS:-true} \
 	PYTHONPATH=.$${PYTHONPATH:+:$$PYTHONPATH} \
 	uv run \
@@ -150,14 +147,6 @@ claude-status:
 		echo "No settings file — using Claude Code defaults (Anthropic direct)"; \
 	fi
 	@echo ""
-
-# ── Model discovery ────────────────────────────────────────────
-
-list-models:
-	@./scripts/list-copilot-models.sh
-
-list-models-enabled:
-	@./scripts/list-copilot-models.sh --enabled-only
 
 # ── Install ────────────────────────────────────────────────────
 

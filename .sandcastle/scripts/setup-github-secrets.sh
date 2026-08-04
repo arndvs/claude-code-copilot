@@ -6,13 +6,14 @@ set -euo pipefail
 # ============================================================
 #
 # Walks you through setting the secrets needed for agent
-# workflows to authenticate with the Copilot-backed LiteLLM proxy and GitHub.
+# workflows to authenticate with the LiteLLM proxy (Copilot primary,
+# OpenRouter fallback) and GitHub.
 #
 # Secrets configured:
 #
 #   1. LITELLM_BASE_URL
 #      Base URL for the LiteLLM proxy that routes model traffic
-#      to GitHub Copilot.
+#      to GitHub Copilot (with OpenRouter fallback).
 #
 #   2. LITELLM_MASTER_KEY
 #      Auth token for the LiteLLM proxy.
@@ -72,7 +73,7 @@ set_secret() {
 }
 
 set_secret "LITELLM_BASE_URL" \
-  "Base URL for the LiteLLM proxy that routes Claude-compatible traffic to GitHub Copilot." \
+  "Base URL for the LiteLLM proxy that routes Claude-compatible traffic to GitHub Copilot (with OpenRouter fallback)." \
   "Use the HTTPS URL for your LiteLLM proxy, without an Anthropic API key."
 
 set_secret "LITELLM_MASTER_KEY" \

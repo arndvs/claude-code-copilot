@@ -9,19 +9,20 @@ For the general security model (localhost binding, bearer auth, no public proxy 
 ## Architecture
 
 ```
-Claude Code client → HTTPS :443 → Caddy (TLS) → 127.0.0.1:4000 → LiteLLM → GitHub Copilot
+Claude Code client → HTTPS :443 → Caddy (TLS) → 127.0.0.1:4000 → LiteLLM → GitHub Copilot (primary)
+                                                                        └→ OpenRouter (fallback)
 
 ```
 
 - One small EC2 instance runs two containers: the LiteLLM proxy (bound to localhost only) and Caddy (terminates TLS, forwards to the proxy).
 - Auth is enforced by LiteLLM via `LITELLM_MASTER_KEY`. Caddy does **not** add auth — the proxy is the gatekeeper.
-- The GitHub Copilot OAuth token is obtained once, on the host, and persisted to a writable mount so it survives restarts and refreshes.
+- The proxy is **dual-provider**: GitHub Copilot is the primary upstream (OAuth token cached on the host and mounted read-write), and OpenRouter is the automatic fallback (`OPENROUTER_API_KEY` in `.env`).
 
 ---
 
 ## Prerequisites
 
-- An AWS account, a registered domain, and a GitHub Copilot subscription.
+- An AWS account, a registered domain, a GitHub Copilot subscription, and an [OpenRouter](https://openrouter.ai) account with an API key.
 - A subdomain you can point at the instance (e.g. `proxy.example.com`).
 - Familiarity with the README's [Production ingress checklist](../README.md#production-ingress-checklist).
 
@@ -89,6 +90,13 @@ chmod 600 .env
 >
 > ```
 
+Add your OpenRouter API key to `.env`:
+
+```bash
+echo 'OPENROUTER_API_KEY=sk-or-…' >> .env
+chmod 600 .env
+```
+
 Store the master key in a managed secret store rather than leaving it only on disk. With AWS Parameter Store (run from **CloudShell** or anywhere with write access — the instance role is intentionally read-only):
 
 ```bash
@@ -105,7 +113,9 @@ The instance role can then read it back; the on-disk `.env` stays `chmod 600`.
 
 ## 4. Authenticate Copilot once, on the host
 
-**This must happen before containerizing.** The OAuth device-code flow needs a browser and writes a token cache that the container later mounts.
+The proxy is dual-provider: **GitHub Copilot is the primary upstream**, so its OAuth token must be obtained once on the host and mounted into the container. The OpenRouter fallback needs only the API key in `.env`.
+
+**Copilot OAuth (primary).** The device-code flow needs a browser and writes a token cache the container later mounts:
 
 ```bash
 set -a && . ./.env && set +a
@@ -129,11 +139,24 @@ rm -rf ~/.config/litellm/github_copilot
 
 ```
 
+**OpenRouter key (fallback).** Add it to `.env` and verify it works:
+
+```bash
+echo 'OPENROUTER_API_KEY=sk-or-…' >> .env
+chmod 600 .env
+set -a && . ./.env && set +a
+curl -s https://openrouter.ai/api/v1/models \
+  -H "Authorization: Bearer $OPENROUTER_API_KEY" | head -c 200
+
+```
+
+If either credential is rotated, update `.env` / redo the OAuth and recreate the container (see §7 — a restart reuses the old environment).
+
 ---
 
 ## 5. Run the proxy container
 
-> **Mount the token read-write (**`:rw`**).** LiteLLM refreshes the Copilot token periodically and must write the new value back to `api-key.json`. A read-only (`:ro`) mount causes requests to start failing with a `Read-only file system … api-key.json` error once the token needs refreshing.
+> **Mount the Copilot token read-write (**`:rw`**).** LiteLLM refreshes the Copilot token periodically and must write the new value back to `api-key.json`. A read-only (`:ro`) mount causes requests to start failing with a `Read-only file system … api-key.json` error once the token needs refreshing.
 
 ```bash
 docker build \
@@ -210,7 +233,7 @@ curl -s https://proxy.example.com/health/version
 
 Expected: (A) a completion, (B) `401`, (C) a timeout/`000`, (D) JSON with `sha` and `built_at`.
 
-**Reboot-survival test:** reboot the instance, wait a few minutes, and re-run check (A) from your external machine. If it returns a completion with no manual intervention, the auto-restart chain (Docker → both containers → persisted cert → persisted token) is sound.
+**Reboot-survival test:** reboot the instance, wait a few minutes, and re-run check (A) from your external machine. If it returns a completion with no manual intervention, the auto-restart chain (Docker → both containers → persisted cert) is sound.
 
 ### Confirm deployed version
 
@@ -258,6 +281,20 @@ docker run -d --name proxy --restart unless-stopped \
 
 Then update Parameter Store (from CloudShell) with the new value and update any clients' `ANTHROPIC_AUTH_TOKEN`.
 
+### Rotate the OpenRouter API key
+
+```bash
+cd /opt/claude-code-copilot
+# update OPENROUTER_API_KEY in .env, then recreate (NOT restart):
+docker rm -f proxy 2>/dev/null || true
+docker run -d --name proxy --restart unless-stopped \
+  --env-file .env \
+  -v "$HOME/.config/litellm/github_copilot:/root/.config/litellm/github_copilot:rw" \
+  -p "127.0.0.1:4000:4000" \
+  claude-code-copilot-proxy:latest
+
+```
+
 This box has two deploy models. **Build-on-box** (below) pulls the repo and
 rebuilds the image on the instance — simplest, and less prone to dependency drift
 now that the `Dockerfile` pins the LiteLLM + Prisma versions (the base image and
@@ -283,7 +320,7 @@ docker run -d --name proxy --restart unless-stopped \
 
 ```
 
-The `.env` and the OAuth token are outside git and are untouched by a redeploy.
+The `.env` and the Copilot OAuth token are outside git and are untouched by a redeploy.
 
 ### Deploy via ECR (immutable image — recommended for production)
 
@@ -292,8 +329,8 @@ dependencies each time. The pinned `Dockerfile` makes that reproducible, but the
 most robust path is to build the image **once** (on a build host or in CI), push
 it to ECR, and have the box **pull a frozen image** — no on-box build, no
 dependency resolution, and instant rollback. The image bakes in
-`litellm_config.yaml`, so an ECR-deployed box needs only `.env` and the OAuth
-token mount — not a git checkout.
+`litellm_config.yaml`, so an ECR-deployed box needs only `.env` and the Copilot
+OAuth token mount — not a git checkout.
 
 **1. One-time — create the registry:**
 
@@ -371,10 +408,9 @@ curl -s http://localhost:4000/health/version            # expect {"sha":"<7-char
 # then run check (A) from §7 with a valid key, from an external machine
 ```
 
-> The `.env` and the OAuth token live outside git and the image, and survive
-> every deploy. Because the image is immutable and self-contained, rolling
-> forward or back is just a `docker pull` + recreate — the proxy is never
-> rebuilt on the box.
+> The `.env` lives outside git and the image, and survives every deploy. Because
+> the image is immutable and self-contained, rolling forward or back is just a
+> `docker pull` + recreate — the proxy is never rebuilt on the box.
 
 ### Grow the disk (no downtime)
 
@@ -406,12 +442,12 @@ docker logs sandcastle-proxy 2>&1 | grep PROXY_LOG | tail
 `upstream_empty: true` flags a `200` whose upstream completion returned no
 content — the signal to watch for.
 
-**Known issue — empty `/v1/messages` responses.** Copilot intermittently returns
-a `200` with empty content through the Anthropic `/v1/messages` endpoint. It has
-been **localized to LiteLLM's Anthropic-translation adapter**, not the upstream
-or the router: on the same server, the OpenAI `/v1/chat/completions` path (no
-translation) is reliable while `/v1/messages` occasionally empties. Reproduce by
-alternating the two endpoints:
+**Known issue — empty `/v1/messages` responses.** The upstream can intermittently
+return a `200` with empty content through the Anthropic `/v1/messages` endpoint.
+It has been **localized to LiteLLM's Anthropic-translation adapter**, not the
+upstream or the router: on the same server, the OpenAI `/v1/chat/completions`
+path (no translation) is reliable while `/v1/messages` occasionally empties.
+Reproduce by alternating the two endpoints:
 
 ```bash
 # from a host with the master key — compare the two endpoints back to back
@@ -442,7 +478,6 @@ with debug logging, capture an empty, then restore:
 docker rm -f sandcastle-proxy 2>/dev/null || true
 docker run -d --name sandcastle-proxy --restart unless-stopped \
   --env-file .env -e LITELLM_LOG=DEBUG \
-  -v "$HOME/.config/litellm/github_copilot:/root/.config/litellm/github_copilot:rw" \
   -p "127.0.0.1:4000:4000" claude-code-copilot-proxy:latest
 # reproduce, read `docker logs sandcastle-proxy`, then re-run WITHOUT -e LITELLM_LOG=DEBUG
 ```
@@ -464,16 +499,18 @@ proxy.example.com {
 
 ## Model selection note
 
-The repo ships honest model mappings — `claude-sonnet-4-6` routes to `github_copilot/claude-sonnet-4.6`. If a particular model is unreliable on your Copilot plan (for example, intermittent `provider returned a response with no 'choices'` errors), you can remap the alias to a more reliable model your plan exposes by editing `litellm_config.yaml`, e.g.:
+The repo ships honest model mappings — each alias has a **primary** (GitHub Copilot) and a **fallback** (OpenRouter) deployment. To change the fallback model, remap the fallback entry to any OpenRouter model ID your key can access by editing `litellm_config.yaml`, e.g.:
 
 ```yaml
-  - model_name: "claude-sonnet-4-6"
+  - model_name: "claude-sonnet-4-6-fallback"
     litellm_params:
-      model: "github_copilot/claude-opus-4.8"   # remapped for reliability
+      model: "openrouter/anthropic/claude-sonnet-4-5"   # remapped fallback
+      api_key: "os.environ/OPENROUTER_API_KEY"
+      stream: true
 
 ```
 
-Use `make list-models-enabled` to see exactly which models your plan exposes. Note that some models (e.g. GPT-5.x Codex) are only reachable via the Responses API and will reject `/v1/messages` chat-completion calls.
+Use `curl https://openrouter.ai/api/v1/models -H "Authorization: Bearer $OPENROUTER_API_KEY"` to see which models your key can access.
 
 ---
 
@@ -481,7 +518,7 @@ Use `make list-models-enabled` to see exactly which models your plan exposes. No
 
 A repo checkout does **not** capture the full running state. When rebuilding a host from scratch, these must be recreated manually:
 
-- `.env` — generated, git-ignored; holds `LITELLM_MASTER_KEY` (and Postgres password if using Compose).
+- `.env` — generated, git-ignored; holds `LITELLM_MASTER_KEY`, `OPENROUTER_API_KEY` (and Postgres password if using Compose).
 - **The Copilot OAuth token** — `~/.config/litellm/github_copilot/`; created by the §4 device-code flow, cannot be regenerated without redoing it.
 - **Caddy config and certificate** — `/opt/caddy/Caddyfile` and `/opt/caddy/data/`.
 - **AWS resources** — the instance, IAM role and policies, security group, Elastic IP, EBS volume, Parameter Store secret, DNS record, ECR repo.
