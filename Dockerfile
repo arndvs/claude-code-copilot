@@ -5,8 +5,13 @@ FROM python:3.12-slim
 # image stays a tag (python:3.12-slim) on purpose — it tracks Debian security
 # patches; for a fully frozen artifact, deploy the prebuilt ECR image (see
 # docs/hosted_deployment.md) instead of rebuilding on the box.
-RUN pip install --no-cache-dir "uv==0.11.21" && \
-    uv pip install --system "litellm[proxy]==1.89.1" "prisma==0.15.0"
+#
+# The LiteLLM version is single-sourced from .litellm-version (refs #111) so a
+# bump updates Docker, Makefile, and start_proxy.sh together.
+COPY .litellm-version .
+RUN LITELLM_VERSION="$(cat .litellm-version)" && \
+    pip install --no-cache-dir "uv==0.11.21" && \
+    uv pip install --system "litellm[proxy]==${LITELLM_VERSION}" "prisma==0.15.0"
 
 WORKDIR /app
 
