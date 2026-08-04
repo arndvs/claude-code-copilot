@@ -32,8 +32,17 @@ echo "  ANTHROPIC_AUTH_TOKEN=<set to your LITELLM_MASTER_KEY>"
 echo "  CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1"
 echo ""
 
+# Single-source LiteLLM version from .litellm-version (refs #126) so a bump
+# updates Docker, Makefile, and this script together.
+LITELLM_VERSION="$(cat "$SCRIPT_DIR/.litellm-version" 2>/dev/null || echo '')"
+if [ -z "$LITELLM_VERSION" ]; then
+  echo "❌ Could not read LiteLLM version from $SCRIPT_DIR/.litellm-version" >&2
+  echo "   Create it (e.g. 'echo 1.89.1 > .litellm-version') before starting." >&2
+  exit 1
+fi
+
 UV_NATIVE_TLS="${UV_NATIVE_TLS:-true}" \
   PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}" \
   exec uv run \
-  --with "litellm[proxy]" \
+  --with "litellm[proxy]==${LITELLM_VERSION}" \
   litellm --config "$SCRIPT_DIR/litellm_config.yaml" --port "${PORT}"
