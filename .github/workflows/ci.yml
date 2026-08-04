@@ -59,7 +59,7 @@ jobs:
         run: |
           cd .sandcastle/engine
           pnpm install --frozen-lockfile
-          pnpm exec tsx lib/lint-pipeline-labels.ts --workflows-dir ../../.github/workflows
+          pnpm exec tsx lib/lint-pipeline-labels.ts
 
       - name: Validate litellm_config.yaml parses
         run: |
