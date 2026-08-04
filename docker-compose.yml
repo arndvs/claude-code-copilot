@@ -16,7 +16,7 @@ services:
     environment:
       LITELLM_LOCAL_MODEL_COST_MAP: "true"
     volumes:
-      # Mount cached GitHub Copilot OAuth token
+      # Mount cached GitHub Copilot OAuth token (primary upstream)
       - ${HOME}/.config/litellm/github_copilot:/root/.config/litellm/github_copilot:rw
     restart: unless-stopped
     healthcheck:
