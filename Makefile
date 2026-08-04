@@ -55,7 +55,7 @@ start:
 	@if [ ! -f .env ]; then echo "❌ .env not found. Run 'make setup' first."; exit 1; fi
 	@set -a && . ./.env && set +a && \
 	PORT=$${LITELLM_PORT:-$(PORT)} && \
-	echo "Starting LiteLLM → OpenRouter proxy on port $$PORT..." && \
+	echo "Starting LiteLLM proxy (GitHub Copilot primary, OpenRouter fallback) on port $$PORT..." && \
 	UV_NATIVE_TLS=$${UV_NATIVE_TLS:-true} \
 	PYTHONPATH=.$${PYTHONPATH:+:$$PYTHONPATH} \
 	uv run \
