@@ -8,10 +8,14 @@ name: "Sandcastle CI"
 on:
   push:
     paths:
+      - ".sandcastle/package.json"
+      - ".sandcastle/run.ts"
       - ".sandcastle/engine/**"
       - ".github/workflows/sandcastle-ci.yml"
   pull_request:
     paths:
+      - ".sandcastle/package.json"
+      - ".sandcastle/run.ts"
       - ".sandcastle/engine/**"
       - ".github/workflows/sandcastle-ci.yml"
   workflow_dispatch:
@@ -44,3 +48,10 @@ jobs:
         run: |
           cd .sandcastle/engine
           pnpm run typecheck
+
+      - name: Smoke test dispatcher module resolution
+        run: |
+          set -euo pipefail
+          output=$(./.sandcastle/engine/node_modules/.bin/tsx .sandcastle/run.ts __smoke__ 2>&1 || true)
+          printf '%s\n' "$output"
+          grep -q 'Unknown workflow: "__smoke__"' <<<"$output"
