@@ -185,7 +185,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     """CLI entry point: read http_code + body from argv/stdin, print verdict.
 
     Usage: python3 probe_parser.py <http_code> < <body_file>
-    Prints ``status=<s>`` and ``detail=<d>`` lines to stdout.
+    Prints ``status=<s>``, ``format=<f>``, ``hard=<b>``, and (when present)
+    ``detail=<d>`` lines to stdout.
     """
     import sys
 
