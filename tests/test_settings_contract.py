@@ -69,6 +69,42 @@ def config():
     return data
 
 
+def _litellm_settings(config):
+    """Return litellm_settings, asserting it is a mapping.
+
+    A structurally wrong config (e.g. litellm_settings is a string or list)
+    would otherwise let the per-block assertions call .get() on a non-mapping
+    and fail with an opaque AttributeError instead of a clear contract message
+    (CONTEXT.md §1).
+    """
+    settings = config.get("litellm_settings", {})
+    assert isinstance(settings, dict), (
+        f"litellm_settings must be a mapping; got {type(settings).__name__} "
+        f"({settings!r}) (CONTEXT.md §1)."
+    )
+    return settings
+
+
+def _general_settings(config):
+    """Return general_settings, asserting it is a mapping (CONTEXT.md §1)."""
+    settings = config.get("general_settings", {})
+    assert isinstance(settings, dict), (
+        f"general_settings must be a mapping; got {type(settings).__name__} "
+        f"({settings!r}) (CONTEXT.md §1)."
+    )
+    return settings
+
+
+def _router_settings(config):
+    """Return router_settings, asserting it is a mapping (CONTEXT.md §1)."""
+    settings = config.get("router_settings", {})
+    assert isinstance(settings, dict), (
+        f"router_settings must be a mapping; got {type(settings).__name__} "
+        f"({settings!r}) (CONTEXT.md §1)."
+    )
+    return settings
+
+
 class TestTopLevelKeys:
     """The YAML must not contain unknown top-level keys."""
 
@@ -86,7 +122,7 @@ class TestLitellmSettings:
 
     def test_drop_params_is_true(self, config):
         """drop_params must be the boolean true (not a string or missing)."""
-        settings = config.get("litellm_settings", {})
+        settings = _litellm_settings(config)
         assert settings.get("drop_params") is True, (
             f"litellm_settings.drop_params must be true; got "
             f"{settings.get('drop_params')!r}. A typo here lets unsupported "
@@ -95,7 +131,7 @@ class TestLitellmSettings:
 
     def test_additional_drop_params_is_list_of_strings(self, config):
         """additional_drop_params must be a list of strings."""
-        settings = config.get("litellm_settings", {})
+        settings = _litellm_settings(config)
         value = settings.get("additional_drop_params")
         assert isinstance(value, list) and value, (
             f"litellm_settings.additional_drop_params must be a non-empty list; "
@@ -106,9 +142,23 @@ class TestLitellmSettings:
             f"got {value!r} (CONTEXT.md §1)."
         )
 
+    def test_json_logs_is_bool(self, config):
+        """json_logs must be a bool (guards the key's presence/type).
+
+        A typo (e.g. ``json_logs: "true"`` as a string, or a missing key)
+        silently disables structured proxy logging without a signal.
+        """
+        settings = _litellm_settings(config)
+        json_logs = settings.get("json_logs")
+        assert isinstance(json_logs, bool), (
+            f"litellm_settings.json_logs must be a bool; got {json_logs!r}. "
+            f"A non-bool value silently disables structured proxy logs "
+            f"(CONTEXT.md §1)."
+        )
+
     def test_callbacks_is_non_empty_list(self, config):
         """callbacks must be a non-empty list (observability + health/version)."""
-        settings = config.get("litellm_settings", {})
+        settings = _litellm_settings(config)
         callbacks = settings.get("callbacks")
         assert isinstance(callbacks, list) and callbacks, (
             f"litellm_settings.callbacks must be a non-empty list; got "
@@ -122,7 +172,7 @@ class TestLitellmSettings:
         A stale module path (e.g. after a rename) silently drops observability
         and the /health/version endpoint while the proxy still starts.
         """
-        settings = config.get("litellm_settings", {})
+        settings = _litellm_settings(config)
         callbacks = settings.get("callbacks", [])
         for callback in callbacks:
             assert isinstance(callback, str), (
@@ -144,7 +194,7 @@ class TestGeneralSettings:
 
     def test_master_key_uses_os_environ_pattern(self, config):
         """master_key must reference an env var via the os.environ/ pattern."""
-        settings = config.get("general_settings", {})
+        settings = _general_settings(config)
         master_key = settings.get("master_key")
         assert isinstance(master_key, str) and master_key.startswith("os.environ/"), (
             f"general_settings.master_key must be an 'os.environ/...' reference; "
@@ -158,7 +208,7 @@ class TestRouterSettings:
 
     def test_num_retries_is_positive_int(self, config):
         """router_settings.num_retries must be a positive integer."""
-        settings = config.get("router_settings", {})
+        settings = _router_settings(config)
         num_retries = settings.get("num_retries")
         assert isinstance(num_retries, int) and num_retries > 0, (
             f"router_settings.num_retries must be a positive int; got "
@@ -171,9 +221,70 @@ class TestRouterSettings:
         If only one block is updated, the effective retry behavior diverges from
         what CONTEXT.md documents without any signal.
         """
-        litellm_retries = config.get("litellm_settings", {}).get("num_retries")
-        router_retries = config.get("router_settings", {}).get("num_retries")
+        litellm_retries = _litellm_settings(config).get("num_retries")
+        router_retries = _router_settings(config).get("num_retries")
         assert litellm_retries == router_retries, (
             f"num_retries diverges: litellm_settings={litellm_retries!r} vs "
             f"router_settings={router_retries!r}. They must match (CONTEXT.md §1)."
         )
+
+
+class TestMalformedSettingsFailsLoud:
+    """Structural breaks must fail with a clear contract message, not AttributeError.
+
+    Mirrors ``TestMalformedConfigFailsLoud`` in test_model_entry_contract.py: the
+    settings-block helpers assert types up front so a deliberately-broken config
+    yields an actionable failure instead of an opaque AttributeError (from .get()
+    on a non-mapping) or a confusing pass. Refs #137.
+    """
+
+    def test_drop_params_as_string_fails(self):
+        """drop_params as a string (e.g. "true") must fail loudly."""
+        with pytest.raises(AssertionError, match="drop_params must be true"):
+            TestLitellmSettings().test_drop_params_is_true(
+                {"litellm_settings": {"drop_params": "true"}}
+            )
+
+    def test_additional_drop_params_with_non_str_member_fails(self):
+        """additional_drop_params with a non-str member must fail loudly."""
+        with pytest.raises(AssertionError, match="list of strings"):
+            TestLitellmSettings().test_additional_drop_params_is_list_of_strings(
+                {"litellm_settings": {"additional_drop_params": ["response_format", 42]}}
+            )
+
+    def test_empty_callbacks_fails(self):
+        """Empty callbacks must fail loudly (observability would vanish)."""
+        with pytest.raises(AssertionError, match="callbacks must be a non-empty list"):
+            TestLitellmSettings().test_callbacks_is_non_empty_list(
+                {"litellm_settings": {"callbacks": []}}
+            )
+
+    def test_master_key_not_os_environ_fails(self):
+        """master_key not matching the os.environ/ pattern must fail loudly."""
+        with pytest.raises(AssertionError, match="os.environ"):
+            TestGeneralSettings().test_master_key_uses_os_environ_pattern(
+                {"general_settings": {"master_key": "LITELLM_MASTER_KEY"}}
+            )
+
+    def test_num_retries_mismatch_fails(self):
+        """num_retries diverging across blocks must fail loudly."""
+        with pytest.raises(AssertionError, match="num_retries diverges"):
+            TestRouterSettings().test_num_retries_consistent_across_blocks(
+                {
+                    "litellm_settings": {"num_retries": 3},
+                    "router_settings": {"num_retries": 5},
+                }
+            )
+
+    def test_unknown_top_level_key_fails(self):
+        """An unknown top-level key (e.g. litellm_setting typo) must fail loudly."""
+        with pytest.raises(AssertionError, match="Unknown top-level key"):
+            TestTopLevelKeys().test_no_unknown_top_level_keys(
+                {"litellm_setting": {}}
+            )
+
+    @pytest.mark.parametrize("bad", ["not-a-mapping", ["x"], 42, None])
+    def test_litellm_settings_must_be_a_mapping(self, bad):
+        """litellm_settings as a non-mapping must fail with a clear message."""
+        with pytest.raises(AssertionError, match="litellm_settings must be a mapping"):
+            _litellm_settings({"litellm_settings": bad})
