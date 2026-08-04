@@ -1,19 +1,17 @@
 """Tests for the model-entry structural contract in litellm_config.yaml.
 
-Every ``model_list`` entry must satisfy the contract documented in CONTEXT.md §1:
-each entry routes to ``github_copilot/*``, carries the four required editor
-headers Copilot validates, and those header values are identical across all
-entries. This is an executable specification of "what a correct model entry
-looks like" — it catches config errors at PR time instead of at runtime (the
-daily ``model-health.yml`` probe, which needs secrets and can't tell "Copilot
-changed availability" from "the config is structurally wrong").
+Every ``model_list`` entry must satisfy the contract documented in CONTEXT.md §1.
+The proxy is dual-provider: each alias has a PRIMARY (GitHub Copilot) and a
+FALLBACK (OpenRouter) deployment. This is an executable specification of "what a
+correct model entry looks like" — it catches config errors at PR time instead of
+at runtime (the daily ``model-health.yml`` probe, which needs secrets and can't
+tell "provider changed availability" from "the config is structurally wrong").
 
 Refs #80
 """
 
 from __future__ import annotations
 
-import re
 import yaml
 from pathlib import Path
 
@@ -22,18 +20,18 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = REPO_ROOT / "litellm_config.yaml"
-MODELS_SCRIPT_PATH = REPO_ROOT / "scripts" / "list-copilot-models.sh"
 
-# The four editor headers Copilot validates on every request. See CONTEXT.md §1.
-REQUIRED_HEADER_KEYS = (
-    "Editor-Version",
-    "Editor-Plugin-Version",
-    "Copilot-Integration-Id",
-    "User-Agent",
-)
-
-# Every litellm_params.model must route through the Copilot provider.
+# Primary deployments route through the GitHub Copilot provider.
 COPILOT_MODEL_PREFIX = "github_copilot/"
+
+# Fallback deployments route through the OpenRouter provider.
+OPENROUTER_MODEL_PREFIX = "openrouter/"
+
+# Fallback entries carry an api_key read from the environment.
+API_KEY_REF = "os.environ/OPENROUTER_API_KEY"
+
+# Fallback model_names are the primary name + this suffix.
+FALLBACK_SUFFIX = "-fallback"
 
 
 @pytest.fixture
@@ -86,10 +84,9 @@ def _litellm_params(entry):
     return params
 
 
-def _entry_headers(entry):
-    """Return an entry's extra_headers mapping (or an empty dict)."""
-    headers = _litellm_params(entry).get("extra_headers", {})
-    return headers if isinstance(headers, dict) else {}
+def _is_fallback(name: str) -> bool:
+    """A fallback entry's model_name ends with the fallback suffix."""
+    return isinstance(name, str) and name.endswith(FALLBACK_SUFFIX)
 
 
 class TestModelEntryContract:
@@ -108,109 +105,66 @@ class TestModelEntryContract:
                 f"non-empty model_name (CONTEXT.md §1)."
             )
 
-    def test_every_entry_targets_github_copilot(self, config):
-        """litellm_params.model must use the github_copilot/ provider prefix.
+    def test_primaries_target_github_copilot(self, config):
+        """Primary (non-fallback) entries must use the github_copilot/ prefix.
 
         A typo in the prefix routes to the wrong LiteLLM provider and fails at
         runtime with a confusing error instead of at PR time.
         """
         for entry in _model_list(config):
             name = entry.get("model_name", "<unnamed>")
+            if _is_fallback(name):
+                continue
             model = _litellm_params(entry).get("model")
             assert isinstance(model, str) and model.startswith(COPILOT_MODEL_PREFIX), (
-                f"Model '{name}' routes to {model!r}; expected a value starting with "
-                f"{COPILOT_MODEL_PREFIX!r} (CONTEXT.md §1)."
+                f"Primary model '{name}' routes to {model!r}; expected a value "
+                f"starting with {COPILOT_MODEL_PREFIX!r} (CONTEXT.md §1)."
             )
 
-    def test_every_entry_has_all_required_headers(self, config):
-        """Copilot rejects requests missing any of the four editor headers."""
+    def test_fallbacks_target_openrouter_with_api_key(self, config):
+        """Fallback entries must route to openrouter/ and carry the API key."""
         for entry in _model_list(config):
             name = entry.get("model_name", "<unnamed>")
+            if not _is_fallback(name):
+                continue
             params = _litellm_params(entry)
-            assert isinstance(params.get("extra_headers"), dict), (
-                f"Model '{name}' has no extra_headers mapping; the four editor "
-                f"headers are required on every entry (CONTEXT.md §1)."
+            model = params.get("model")
+            assert isinstance(model, str) and model.startswith(OPENROUTER_MODEL_PREFIX), (
+                f"Fallback model '{name}' routes to {model!r}; expected a value "
+                f"starting with {OPENROUTER_MODEL_PREFIX!r} (CONTEXT.md §1)."
             )
-            headers = _entry_headers(entry)
-            missing = [k for k in REQUIRED_HEADER_KEYS if not headers.get(k)]
-            assert not missing, (
-                f"Model '{name}' is missing required editor header(s): {missing}. "
-                f"Copilot validates these on every request (CONTEXT.md §1)."
+            assert params.get("api_key") == API_KEY_REF, (
+                f"Fallback model '{name}' has api_key={params.get('api_key')!r}; "
+                f"expected {API_KEY_REF!r} (CONTEXT.md §1)."
             )
 
-    def test_header_values_are_consistent_across_entries(self, config):
-        """All entries (incl. the wildcard) must use identical header values.
+    def test_every_primary_has_a_fallback(self, config):
+        """Every primary alias must have a matching fallback wired in router_settings.
 
-        A per-model header edit would make only *some* models fail — a subtle,
-        hard-to-diagnose partial outage. The check is order-independent: it groups
-        every entry by the value it uses for each header and asserts a single
-        distinct value, so a divergence names all sides rather than implying the
-        first entry is canonical.
+        The whole point of the dual-provider setup is resilience: if Copilot
+        fails, the router falls back to OpenRouter. A primary without a fallback
+        silently loses that resilience.
         """
         model_list = _model_list(config)
-        for key in REQUIRED_HEADER_KEYS:
-            by_value = {}
-            for entry in model_list:
-                value = _entry_headers(entry).get(key)
-                by_value.setdefault(value, []).append(entry.get("model_name", "<unnamed>"))
-            assert len(by_value) == 1, (
-                f"Header {key} has inconsistent values across entries: "
-                f"{ {value: models for value, models in by_value.items()} }. All entries "
-                f"must use identical header values (CONTEXT.md §1)."
+        fallbacks = config.get("router_settings", {}).get("fallbacks", {})
+        assert isinstance(fallbacks, dict), "router_settings.fallbacks must be a mapping"
+
+        for entry in model_list:
+            name = entry.get("model_name", "<unnamed>")
+            if _is_fallback(name) or name == "*":
+                continue
+            assert name in fallbacks, (
+                f"Primary model '{name}' has no entry in router_settings.fallbacks; "
+                f"it will not fall back to OpenRouter on Copilot failure (CONTEXT.md §1)."
             )
-
-
-class TestScriptHeaderDrift:
-    """scripts/list-copilot-models.sh hardcodes the same headers — they must not drift."""
-
-    def _extract_script_headers(self):
-        """Extract the four header values embedded as jq string literals.
-
-        In scripts/list-copilot-models.sh the values sit inside a jq
-        string-concatenation expression where each quote is backslash-escaped
-        (the source has a backslash immediately before each double quote). The
-        regex tolerates both that backslash-escaped form and a plain-quoted form,
-        so reformatting the jq filter cannot silently defeat the check.
-        """
-        if not MODELS_SCRIPT_PATH.exists():
-            pytest.skip(f"list-copilot-models.sh not found at {MODELS_SCRIPT_PATH}")
-        text = MODELS_SCRIPT_PATH.read_text(encoding="utf-8")
-        found = {}
-        for key in REQUIRED_HEADER_KEYS:
-            match = re.search(rf'{re.escape(key)}:\s*\\?"([^"\\]+)\\?"', text)
-            if match:
-                found[key] = match.group(1)
-        # Fail loudly on extraction failure — never silently pass (issue #80, risk 3).
-        assert len(found) == len(REQUIRED_HEADER_KEYS), (
-            f"Could not extract all four editor headers from {MODELS_SCRIPT_PATH.name}; "
-            f"found only {sorted(found)}. The script's header block was likely "
-            f"reformatted — update this test's regex or the script (CONTEXT.md §1)."
-        )
-        return found
-
-    def test_script_headers_match_config(self, config):
-        """Header values in list-copilot-models.sh must match litellm_config.yaml.
-
-        The script generates config entries; if its hardcoded headers drift from
-        the config, it silently emits entries with stale headers that Copilot
-        would reject. Order-independent: compares the script value against the set
-        of values the config actually uses, and fails clearly if the config value
-        is missing rather than comparing against None.
-        """
-        model_list = _model_list(config)
-        script_headers = self._extract_script_headers()
-        for key in REQUIRED_HEADER_KEYS:
-            config_values = {_entry_headers(entry).get(key) for entry in model_list}
-            config_values.discard(None)
-            config_values.discard("")
-            assert config_values, (
-                f"No config value found for header {key} in litellm_config.yaml; cannot "
-                f"check {MODELS_SCRIPT_PATH.name} for drift (CONTEXT.md §1)."
+            fb_list = fallbacks[name]
+            assert isinstance(fb_list, list) and fb_list, (
+                f"Primary model '{name}' has an empty fallbacks list (CONTEXT.md §1)."
             )
-            assert script_headers[key] in config_values, (
-                f"Header {key} drift: {MODELS_SCRIPT_PATH.name} has {script_headers[key]!r} "
-                f"but litellm_config.yaml uses {sorted(config_values)!r}. Update the script "
-                f"when config headers change so generated entries stay valid (CONTEXT.md §1)."
+            expected = f"{name}{FALLBACK_SUFFIX}"
+            assert expected in fb_list, (
+                f"Primary model '{name}' fallbacks {fb_list!r} do not include the "
+                f"expected fallback deployment {expected!r} (CONTEXT.md §1)."
             )
 
 

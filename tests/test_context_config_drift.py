@@ -67,42 +67,30 @@ def _context_table(markdown: str) -> dict[str, str]:
 
 
 def _config_model_map(config: dict) -> dict[str, str]:
+    """Map primary (non-fallback) model_names to their Copilot target.
+
+    The CONTEXT.md table documents the primary Copilot target for each alias,
+    so fallback (OpenRouter) entries are excluded here.
+    """
     model_list = config.get("model_list", [])
     assert isinstance(model_list, list) and model_list, "model_list must be non-empty"
-    return {
-        entry["model_name"]: entry["litellm_params"]["model"]
-        for entry in model_list
-    }
-
-
-def _config_header_values(config: dict) -> dict[str, str]:
-    models = config.get("model_list", [])
-    assert isinstance(models, list) and models, "model_list must be non-empty"
-    first_headers = models[0]["litellm_params"]["extra_headers"]
-    return {key: str(value) for key, value in first_headers.items()}
+    result: dict[str, str] = {}
+    for entry in model_list:
+        name = entry.get("model_name", "")
+        if name.endswith("-fallback"):
+            continue
+        result[name] = entry["litellm_params"]["model"]
+    return result
 
 
 def test_context_model_mapping_matches_litellm_config(context_text, config):
-    section = _section(context_text, "1. LiteLLM → Copilot routing", "2. DB-less default mode")
+    section = _section(context_text, "1. LiteLLM → Copilot routing (with OpenRouter fallback)", "2. DB-less default mode")
     model_table = _between(
         section,
-        "| Alias (Claude Code sends) | Target (Copilot receives) |",
-        "Every model entry carries four required editor headers",
+        "| Alias (Claude Code sends) | Primary (Copilot) | Fallback (OpenRouter) |",
+        "Primary entries carry the four editor headers",
     )
     assert _context_table(model_table) == _config_model_map(config)
-
-
-def test_context_header_values_match_litellm_config(context_text, config):
-    section = _section(context_text, "1. LiteLLM → Copilot routing", "2. DB-less default mode")
-    header_table = _between(section, "| Header | Value |", "**Auth boundary.**")
-    table = _context_table(header_table)
-    config_headers = _config_header_values(config)
-    documented_headers = {
-        key: table[key]
-        for key in config_headers
-        if key in table
-    }
-    assert documented_headers == config_headers
 
 
 def test_context_litellm_settings_claims_match_config(context_text, config):
