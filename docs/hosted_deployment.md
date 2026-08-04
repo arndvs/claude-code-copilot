@@ -478,6 +478,7 @@ with debug logging, capture an empty, then restore:
 docker rm -f sandcastle-proxy 2>/dev/null || true
 docker run -d --name sandcastle-proxy --restart unless-stopped \
   --env-file .env -e LITELLM_LOG=DEBUG \
+  -v "$HOME/.config/litellm/github_copilot:/root/.config/litellm/github_copilot:rw" \
   -p "127.0.0.1:4000:4000" claude-code-copilot-proxy:latest
 # reproduce, read `docker logs sandcastle-proxy`, then re-run WITHOUT -e LITELLM_LOG=DEBUG
 ```
