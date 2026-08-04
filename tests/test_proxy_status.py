@@ -234,7 +234,9 @@ class TestProxyEnvKeysManifest:
         """claude_enable.py must write exactly the keys in the manifest.
 
         Runs claude_enable.py against an isolated settings file and asserts the
-        written env keys are a subset of PROXY_ENV_KEYS.
+        written env keys exactly match PROXY_ENV_KEYS — no extras and none
+        missing, so a key added to enable but not the manifest (or vice versa)
+        fails the drift guard.
         """
         import subprocess
         import sys
@@ -257,9 +259,9 @@ class TestProxyEnvKeysManifest:
         import json
 
         written = json.loads(settings_file.read_text())["env"]
-        assert set(written) <= set(proxy_status.PROXY_ENV_KEYS), (
-            f"claude_enable.py wrote keys {set(written) - set(proxy_status.PROXY_ENV_KEYS)} "
-            f"not declared in PROXY_ENV_KEYS"
+        assert set(written) == set(proxy_status.PROXY_ENV_KEYS), (
+            f"claude_enable.py wrote keys {set(written) ^ set(proxy_status.PROXY_ENV_KEYS)} "
+            f"that differ from PROXY_ENV_KEYS"
         )
 
     def test_disable_removes_only_manifest_keys(self, tmp_path, monkeypatch):
@@ -272,19 +274,6 @@ class TestProxyEnvKeysManifest:
         import subprocess
         import sys
 
-        settings_file = tmp_path / "settings.json"
-        settings_file.write_text(
-            json.dumps(
-                {
-                    "env": {
-                        "ANTHROPIC_BASE_URL": "http://localhost:4000",
-                        "ANTHROPIC_AUTH_TOKEN": "sk-test",
-                        "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1",
-                        "UNRELATED_KEY": "keep-me",
-                    }
-                }
-            )
-        )
         # claude_disable.py uses Path.home() — point HOME (and USERPROFILE on
         # Windows) at tmp_path.
         monkeypatch.setenv("HOME", str(tmp_path))
