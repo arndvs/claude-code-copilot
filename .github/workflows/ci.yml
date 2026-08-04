@@ -47,6 +47,20 @@ jobs:
       - name: Run Python unit tests
         run: pytest tests/ -q --tb=short
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Lint pipeline label transitions
+        run: |
+          cd .sandcastle/engine
+          pnpm install --frozen-lockfile
+          pnpm exec tsx lib/lint-pipeline-labels.ts
+
       - name: Validate litellm_config.yaml parses
         run: |
           python3 -c "import yaml; yaml.safe_load(open('litellm_config.yaml')); print('litellm_config.yaml OK')"

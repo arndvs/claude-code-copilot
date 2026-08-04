@@ -2,7 +2,11 @@
  * lint-pipeline-labels.ts — Static linter for agent-*.yml label transitions.
  *
  * Parses workflow YAML files, extracts `--add-label` / `--remove-label`
- * operations, and validates added labels against pipeline object-type constraints.
+ * operations, and validates them against the pipeline state machine:
+ *   - object-type constraints (which labels may appear on issues vs PRs)
+ *   - transition legality (each added label must be a declared successor of
+ *     the workflow's trigger label)
+ *   - mutual exclusions (conflicting labels must not coexist)
  *
  * Usage:
  *   cd .sandcastle/engine
@@ -13,7 +17,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { LABELS } from "./pipeline-states.js";
+import { validateTransition } from "./pipeline-states.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -36,6 +40,8 @@ interface Violation {
 const LABEL_RE =
   /gh\s+(?:issue|pr)\s+edit\b.*?--(add|remove)-label\s+"([^"]+)"/g;
 const OBJECT_TYPE_RE = /gh\s+(issue|pr)\s+edit/;
+// Trigger label from a job's `if: github.event.label.name == 'X'` condition.
+const TRIGGER_RE = /github\.event\.label\.name\s*==\s*['"]([^'"]+)['"]/;
 
 interface LogicalLine {
   text: string;
@@ -86,6 +92,12 @@ function lineForIndex(logical: LogicalLine, index: number): number {
   return logical.startLine + offset;
 }
 
+/** Extract the trigger label from a workflow's job `if:` conditions. */
+function extractTriggerLabel(content: string): string | undefined {
+  const match = TRIGGER_RE.exec(content);
+  return match?.[1];
+}
+
 function extractLabelOps(filePath: string): LabelOp[] {
   const content = fs.readFileSync(filePath, "utf8");
   const lines = content.split("\n");
@@ -114,29 +126,82 @@ function extractLabelOps(filePath: string): LabelOp[] {
 
 // ── Validate ─────────────────────────────────────────────────────────────────
 
-function validateOps(ops: LabelOp[]): Violation[] {
+interface ValidationOutcome {
+  violations: Violation[];
+  warnings: Violation[];
+}
+
+function validateOps(ops: LabelOp[], triggerLabel?: string): ValidationOutcome {
   const violations: Violation[] = [];
+  const warnings: Violation[] = [];
 
+  // Group ops by (file, line) — each logical line is one transition step.
+  const steps = new Map<string, LabelOp[]>();
   for (const op of ops) {
-    if (op.action !== "add") continue; // only validate adds
+    const key = `${op.file}:${op.line}`;
+    const group = steps.get(key) ?? [];
+    group.push(op);
+    steps.set(key, group);
+  }
 
-    const def = LABELS[op.label];
-    if (!def) {
-      // Unknown label — warning, not a violation
-      continue;
+  for (const group of steps.values()) {
+    const adds = group.filter((o) => o.action === "add");
+    const removes = group.filter((o) => o.action === "remove");
+    const objectType = group[0]!.objectType;
+
+    // `current` = labels already on the object. The trigger label is on the
+    // object when a label-triggered workflow runs, so include it — otherwise a
+    // mutual-exclusion conflict between the trigger label and an added label
+    // (e.g. adding "agent:queued" without removing "agent:implement") would be
+    // missed. Labels being removed are also on the object now.
+    const current = [
+      ...(triggerLabel ? [triggerLabel] : []),
+      ...removes.map((o) => o.label),
+    ];
+
+    // Transition legality + mutual exclusions + object-type constraints via the
+    // shared state machine (single source of truth — no duplicate object-type
+    // loop here).
+    const result = validateTransition(
+      current,
+      {
+        add: adds.map((o) => o.label),
+        remove: removes.map((o) => o.label),
+      },
+      objectType,
+      triggerLabel,
+    );
+    for (const err of result.errors) {
+      violations.push({
+        file: group[0]!.file,
+        line: group[0]!.line,
+        message: err,
+      });
+    }
+    for (const warn of result.warnings) {
+      warnings.push({
+        file: group[0]!.file,
+        line: group[0]!.line,
+        message: warn,
+      });
     }
 
-    // Object-type check
-    if (!def.appliesTo.includes(op.objectType)) {
-      violations.push({
-        file: op.file,
-        line: op.line,
-        message: `Label "${op.label}" applied to ${op.objectType} but only allowed on: ${def.appliesTo.join(", ")}`,
+    // If a workflow adds labels but has no trigger label, transition legality
+    // cannot be verified — surface it so the state-machine gate can't be
+    // silently bypassed. Reported as a warning (not a violation) because some
+    // legitimate workflows (e.g. agent-promote-queued, triggered by issue
+    // close) perform legal transitions without a label trigger.
+    if (adds.length > 0 && !triggerLabel) {
+      warnings.push({
+        file: group[0]!.file,
+        line: group[0]!.line,
+        message:
+          "Workflow adds labels but has no label trigger — transition legality cannot be verified.",
       });
     }
   }
 
-  return violations;
+  return { violations, warnings };
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────
@@ -178,18 +243,29 @@ function main(): void {
 
   let totalOps = 0;
   const allViolations: Violation[] = [];
+  const allWarnings: Violation[] = [];
 
   for (const file of files) {
+    const content = fs.readFileSync(file, "utf8");
+    const triggerLabel = extractTriggerLabel(content);
     const ops = extractLabelOps(file);
     totalOps += ops.length;
-    const violations = validateOps(ops);
-    allViolations.push(...violations);
+    const outcome = validateOps(ops, triggerLabel);
+    allViolations.push(...outcome.violations);
+    allWarnings.push(...outcome.warnings);
   }
 
   // Report
   console.log(
     `Scanned ${files.length} workflow files, ${totalOps} label operations.`,
   );
+
+  if (allWarnings.length > 0) {
+    console.log(`\n⚠️  ${allWarnings.length} warning(s):`);
+    for (const w of allWarnings) {
+      console.log(`  ${w.file}:${w.line} — ${w.message}`);
+    }
+  }
 
   if (allViolations.length === 0) {
     console.log("✅ All label operations conform to the pipeline state machine.");
