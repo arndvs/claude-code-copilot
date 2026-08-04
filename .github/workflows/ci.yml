@@ -47,6 +47,12 @@ jobs:
       - name: Run Python unit tests
         run: pytest tests/ -q --tb=short
 
+      - name: Lint pipeline label transitions
+        run: |
+          cd .sandcastle/engine
+          pnpm install --frozen-lockfile
+          pnpm exec tsx lib/lint-pipeline-labels.ts --workflows-dir ../../.github/workflows
+
       - name: Validate litellm_config.yaml parses
         run: |
           python3 -c "import yaml; yaml.safe_load(open('litellm_config.yaml')); print('litellm_config.yaml OK')"
