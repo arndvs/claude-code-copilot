@@ -56,6 +56,7 @@ start:
 	@set -a && . ./.env && set +a && \
 	PORT=$${LITELLM_PORT:-$(PORT)} && \
 	LITELLM_VERSION=$$(cat .litellm-version 2>/dev/null || echo '') && \
+	if [ -z "$$LITELLM_VERSION" ]; then echo "❌ Could not read LiteLLM version from .litellm-version. Create it (e.g. 'echo 1.89.1 > .litellm-version') before starting."; exit 1; fi && \
 	echo "Starting LiteLLM proxy (GitHub Copilot primary, OpenRouter fallback) on port $$PORT..." && \
 	UV_NATIVE_TLS=$${UV_NATIVE_TLS:-true} \
 	PYTHONPATH=.$${PYTHONPATH:+:$$PYTHONPATH} \

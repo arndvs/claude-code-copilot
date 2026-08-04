@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # test_version_drift.sh — Verify all LiteLLM version consumers reference .litellm-version
 #
-# Acceptance criteria (from issue #111):
+# Acceptance criteria (from issue #126):
 #   1. .litellm-version exists and contains a non-empty version string
 #   2. Dockerfile reads the version from .litellm-version (not a hardcoded pin)
 #   3. Makefile:start reads the version from .litellm-version
@@ -39,7 +39,7 @@ fi
 
 # ── Test 2: Dockerfile reads from .litellm-version ────────────
 echo "Test 2: Dockerfile reads version from .litellm-version"
-if grep -q 'COPY .litellm-version' Dockerfile && grep -q 'cat .litellm-version' Dockerfile; then
+if grep -Fq 'COPY .litellm-version' Dockerfile && grep -Fq 'cat .litellm-version' Dockerfile; then
     pass "Dockerfile reads .litellm-version"
 else
     fail "Dockerfile does not read .litellm-version (expected COPY + cat)"
@@ -47,7 +47,7 @@ fi
 
 # ── Test 3: Makefile reads from .litellm-version ──────────────
 echo "Test 3: Makefile reads version from .litellm-version"
-if grep -q 'cat .litellm-version' Makefile; then
+if grep -Fq 'cat .litellm-version' Makefile; then
     pass "Makefile reads .litellm-version"
 else
     fail "Makefile does not read .litellm-version"
@@ -55,7 +55,7 @@ fi
 
 # ── Test 4: start_proxy.sh reads from .litellm-version ────────
 echo "Test 4: start_proxy.sh reads version from .litellm-version"
-if grep -q 'cat "$SCRIPT_DIR/.litellm-version"' start_proxy.sh; then
+if grep -Fq 'cat "$SCRIPT_DIR/.litellm-version"' start_proxy.sh; then
     pass "start_proxy.sh reads .litellm-version"
 else
     fail "start_proxy.sh does not read .litellm-version"
@@ -70,7 +70,7 @@ if [ -n "$VERSION" ]; then
     # so a literal ==<semver> pin is a drift signal.
     drift=$(grep -RhoE 'litellm\[proxy\]==[0-9]+\.[0-9]+\.[0-9]+' \
         Dockerfile Makefile start_proxy.sh 2>/dev/null \
-        | grep -v "==${VERSION}" || true)
+        | grep -Fv "==${VERSION}" || true)
     if [ -n "$drift" ]; then
         fail "Hardcoded litellm version(s) diverge from .litellm-version: $drift"
     else
