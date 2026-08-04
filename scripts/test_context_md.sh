@@ -34,8 +34,8 @@ fi
 # ── Test 2: Four required sections ────────────────────────────
 echo "Test 2: Contains all four architecture sections"
 
-# Section 1: LiteLLM→Copilot routing
-if grep -Eq '^##[[:space:]]+1\.[[:space:]]+LiteLLM.*Copilot routing' "$FILE"; then
+# Section 1: LiteLLM→Copilot routing (with OpenRouter fallback)
+if grep -Eq '^##[[:space:]]+1\.[[:space:]]+LiteLLM.*routing' "$FILE"; then
     pass "Section: LiteLLM→Copilot routing present"
 else
     fail "Section: LiteLLM→Copilot routing missing"
@@ -75,12 +75,11 @@ fi
 # ── Test 4: Drift guard (phrase checks) ─────────────────────
 echo "Test 4: Drift guard (phrase checks)"
 
-# 4a: Mentions the four required editor headers from litellm_config.yaml
-if grep -q "Editor-Version" "$FILE" && grep -q "Editor-Plugin-Version" "$FILE" \
-    && grep -q "Copilot-Integration-Id" "$FILE" && grep -q "User-Agent" "$FILE"; then
-    pass "References four editor headers"
+# 4a: References the OpenRouter provider and fallback architecture
+if grep -qi "openrouter" "$FILE" && grep -qi "fallback" "$FILE"; then
+    pass "References OpenRouter provider and fallback"
 else
-    fail "Missing one or more editor header references"
+    fail "Missing OpenRouter provider or fallback reference"
 fi
 
 # 4b: Mentions the wildcard catch-all
@@ -138,9 +137,9 @@ else
     fail "Missing model-health schedule (daily)"
 fi
 
-# 4i: Model name mapping — hyphenated → dotted
-if grep -Eq 'hyphenated|claude-sonnet|dotted|claude[.]sonnet|claude-opus' "$FILE"; then
-    pass "References model name format (hyphenated vs dotted)"
+# 4i: Model name mapping — hyphenated aliases → provider model IDs
+if grep -Eq 'hyphenated|claude-sonnet|claude-opus|provider/model|model ID' "$FILE"; then
+    pass "References model name format (hyphenated aliases)"
 else
     fail "Missing model name format reference"
 fi

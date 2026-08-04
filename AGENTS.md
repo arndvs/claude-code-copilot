@@ -6,24 +6,25 @@
 
 ## Architecture
 
-LiteLLM proxy translates Anthropic Messages API → GitHub Copilot API.
+LiteLLM proxy translates Anthropic Messages API → GitHub Copilot API (primary), with OpenRouter as fallback.
 
 ```
-Claude Code  →  LiteLLM (:4000)  →  api.githubcopilot.com
+Claude Code  →  LiteLLM (:4000)  →  api.githubcopilot.com (primary)
+                                    └→ openrouter.ai (fallback)
                  ↑ litellm_config.yaml
                  ↑ OAuth token cached at ~/.config/litellm/github_copilot/
+                 ↑ OPENROUTER_API_KEY from .env (fallback)
 ```
 
 ## Key files
 
 | File | Purpose |
 |------|---------|
-| `litellm_config.yaml` | Proxy routing config — wildcard → `github_copilot/*` |
+| `litellm_config.yaml` | Proxy routing config — Copilot primary, `openrouter/*` fallback |
 | `Makefile` | Workflow automation (setup/start/stop/test/enable/disable) |
 | `start_proxy.sh` | Standalone proxy launcher with `.env` loading |
 | `scripts/claude_enable.py` | Write proxy env vars to `~/.claude/settings.json` |
 | `scripts/claude_disable.py` | Remove proxy config from Claude settings |
-| `scripts/list-copilot-models.sh` | Query available Copilot models |
 | `.env.example` | Template for required environment variables |
 
 ## Conventions

@@ -1,8 +1,8 @@
 name: Model health
 
 # Probes every model alias in litellm_config.yaml through the proxy and flags
-# when GitHub Copilot changes availability (e.g. the 'no choices' failure that
-# forced the sonnet -> opus-4.8 remap). Keeps the config honest.
+# when the upstream provider changes availability (e.g. the 'no choices' failure
+# that forced the sonnet -> opus-4.8 remap). Keeps the config honest.
 
 on:
   schedule:
@@ -105,7 +105,7 @@ jobs:
             "" \
             "**Failing:**${BROKEN}" \
             "" \
-            "Usually means GitHub Copilot changed model availability (the same 'no choices' class that forced the sonnet -> opus-4.8 remap). Update the alias targets in \`litellm_config.yaml\`." \
+            "Usually means the upstream provider changed model availability (the same 'no choices' class that forced the sonnet -> opus-4.8 remap). Update the alias targets in \`litellm_config.yaml\`." \
             "" \
             "Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}")
           if [ -n "$existing" ]; then
