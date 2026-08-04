@@ -11,6 +11,7 @@ Refs #81
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -194,3 +195,124 @@ class TestMain:
         monkeypatch.setattr(proxy_status, "read_fallback_port", fake_read)
         proxy_status.main(["proxy_status.py", str(settings), "6543"])
         assert captured["default"] == "6543"
+
+
+class TestProxyEnvKeysManifest:
+    """The PROXY_ENV_KEYS manifest must match what enable writes / disable removes.
+
+    This is the drift guard for the single-source proxy-settings key manifest
+    (refs #117): if a key is added to claude_enable.py but not the manifest,
+    claude_disable.py would silently leave it behind, producing a half-disabled
+    state. The manifest is the source of truth.
+    """
+
+    def test_manifest_is_tuple_of_strings(self):
+        """PROXY_ENV_KEYS must be a tuple/frozenset of non-empty strings."""
+        keys = proxy_status.PROXY_ENV_KEYS
+        assert isinstance(keys, (tuple, frozenset)), (
+            "PROXY_ENV_KEYS must be a tuple or frozenset"
+        )
+        assert keys, "PROXY_ENV_KEYS must not be empty"
+        assert all(isinstance(k, str) and k for k in keys), (
+            "PROXY_ENV_KEYS must contain only non-empty strings"
+        )
+
+    def test_manifest_contains_the_three_proxy_mode_keys(self):
+        """The manifest must declare the canonical proxy-mode keys."""
+        keys = set(proxy_status.PROXY_ENV_KEYS)
+        assert {
+            "ANTHROPIC_BASE_URL",
+            "ANTHROPIC_AUTH_TOKEN",
+            "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS",
+        } <= keys
+
+    def test_openrouter_key_is_not_in_manifest(self):
+        """OPENROUTER_API_KEY is proxy-side, not a Claude-settings key."""
+        assert "OPENROUTER_API_KEY" not in proxy_status.PROXY_ENV_KEYS
+
+    def test_enable_writes_only_manifest_keys(self, tmp_path, monkeypatch):
+        """claude_enable.py must write exactly the keys in the manifest.
+
+        Runs claude_enable.py against an isolated settings file and asserts the
+        written env keys are a subset of PROXY_ENV_KEYS.
+        """
+        import subprocess
+        import sys
+
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text("{}")
+        env = {
+            **os.environ,
+            "LITELLM_MASTER_KEY": "sk-test",
+            "LITELLM_PORT": "4000",
+            "CLAUDE_SETTINGS_FILE": str(settings_file),
+            "PYTHONPATH": str(REPO_ROOT / "scripts"),
+        }
+        subprocess.run(
+            [sys.executable, str(REPO_ROOT / "scripts" / "claude_enable.py")],
+            env=env,
+            check=True,
+            capture_output=True,
+        )
+        import json
+
+        written = json.loads(settings_file.read_text())["env"]
+        assert set(written) <= set(proxy_status.PROXY_ENV_KEYS), (
+            f"claude_enable.py wrote keys {set(written) - set(proxy_status.PROXY_ENV_KEYS)} "
+            f"not declared in PROXY_ENV_KEYS"
+        )
+
+    def test_disable_removes_only_manifest_keys(self, tmp_path, monkeypatch):
+        """claude_disable.py must remove only keys in the manifest.
+
+        A settings file with a proxy key plus an unrelated key must end with the
+        unrelated key intact and all manifest keys removed.
+        """
+        import json
+        import subprocess
+        import sys
+
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text(
+            json.dumps(
+                {
+                    "env": {
+                        "ANTHROPIC_BASE_URL": "http://localhost:4000",
+                        "ANTHROPIC_AUTH_TOKEN": "sk-test",
+                        "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1",
+                        "UNRELATED_KEY": "keep-me",
+                    }
+                }
+            )
+        )
+        # claude_disable.py uses Path.home() — point HOME (and USERPROFILE on
+        # Windows) at tmp_path.
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+        # It writes to ~/.claude/settings.json, so create that path.
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / "settings.json").write_text(
+            json.dumps(
+                {
+                    "env": {
+                        "ANTHROPIC_BASE_URL": "http://localhost:4000",
+                        "ANTHROPIC_AUTH_TOKEN": "sk-test",
+                        "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1",
+                        "UNRELATED_KEY": "keep-me",
+                    }
+                }
+            )
+        )
+        subprocess.run(
+            [sys.executable, str(REPO_ROOT / "scripts" / "claude_disable.py")],
+            env={**os.environ, "HOME": str(tmp_path), "USERPROFILE": str(tmp_path)},
+            check=True,
+            capture_output=True,
+        )
+        remaining = json.loads((claude_dir / "settings.json").read_text())["env"]
+        assert "UNRELATED_KEY" in remaining, "unrelated key must be preserved"
+        assert not (set(proxy_status.PROXY_ENV_KEYS) & set(remaining)), (
+            f"claude_disable.py left manifest keys behind: "
+            f"{set(proxy_status.PROXY_ENV_KEYS) & set(remaining)}"
+        )

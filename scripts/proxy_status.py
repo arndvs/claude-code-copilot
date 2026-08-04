@@ -29,6 +29,20 @@ from urllib.parse import urlparse
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 DEFAULT_PORT = "4000"
 
+# The single authoritative manifest of env-var keys that constitute "Claude Code
+# is in proxy mode". Shared by claude_enable.py (writes) and claude_disable.py
+# (removes) so a key added here is written AND removed together — preventing a
+# half-disabled state. See CONTEXT.md §1.
+#
+# NOTE: OPENROUTER_API_KEY is a proxy-side credential (in .env, used by LiteLLM
+# to reach OpenRouter), NOT a Claude Code proxy-mode settings key — it is
+# intentionally absent from this manifest.
+PROXY_ENV_KEYS = (
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_AUTH_TOKEN",
+    "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS",
+)
+
 
 def resolve_proxy_url(settings, fallback_port=DEFAULT_PORT):
     """Return the configured proxy URL (trailing slash stripped), or ``None``.
