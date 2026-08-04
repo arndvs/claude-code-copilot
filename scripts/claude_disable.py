@@ -11,6 +11,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from proxy_status import PROXY_ENV_KEYS
+
 def main():
     settings_file = Path.home() / '.claude' / 'settings.json'
 
@@ -22,11 +24,9 @@ def main():
         with open(settings_file) as f:
             settings = json.load(f)
 
-        proxy_keys = [
-            'ANTHROPIC_BASE_URL',
-            'ANTHROPIC_AUTH_TOKEN',
-            'CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS',
-        ]
+        # Remove only keys declared in the PROXY_ENV_KEYS manifest so we never
+        # leave a half-disabled state (single source of truth, see CONTEXT.md §1).
+        proxy_keys = list(PROXY_ENV_KEYS)
         env = settings.get('env', {})
         removed = [k for k in proxy_keys if k in env]
         for k in removed:
