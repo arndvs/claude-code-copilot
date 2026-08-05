@@ -15,6 +15,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from proxy_endpoint import resolve_proxy_endpoint
 from proxy_status import PROXY_ENV_KEYS, classify_proxy, validate_proxy_url
 
 
@@ -26,7 +27,10 @@ def resolve_settings_file():
 
 
 def resolve_base_url(port):
-    return os.environ.get('PROXY_BASE_URL', '').strip() or f'http://localhost:{port}'
+    # Canonical precedence: PROXY_BASE_URL -> LITELLM_PORT -> default 4000.
+    # (ANTHROPIC_BASE_URL from settings is intentionally not consulted here —
+    # this script is what writes it, so reading it back would be circular.)
+    return resolve_proxy_endpoint(env_file=".env").url
 
 
 def validate_base_url(base_url, port):
