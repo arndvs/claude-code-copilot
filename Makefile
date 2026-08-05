@@ -1,4 +1,4 @@
-.PHONY: help setup start stop test test-stream claude-enable claude-disable claude-status install-claude
+.PHONY: help setup start stop test test-stream generate-config claude-enable claude-disable claude-status install-claude
 
 PORT ?= 4000
 
@@ -11,6 +11,7 @@ help:
 	@echo "  make stop                Stop the proxy"
 	@echo "  make test                Test proxy is working (non-streaming)"
 	@echo "  make test-stream         Test proxy streaming (SSE) response"
+	@echo "  make generate-config     Regenerate litellm_config.yaml from the model mapping"
 	@echo ""
 	@echo "  make claude-enable       Point Claude Code at local proxy"
 	@echo "  make claude-disable      Restore Claude Code to Anthropic direct"
@@ -69,6 +70,13 @@ stop:
 	@set -a && . ./.env && set +a && \
 	PORT=$${LITELLM_PORT:-$(PORT)} && \
 	pkill -f "litellm --config .*litellm_config.yaml --port $$PORT" 2>/dev/null && echo "✅ Proxy stopped" || echo "ℹ️  No proxy process found"
+
+# ── Config generation ──────────────────────────────────────────
+
+generate-config:
+	@python3 scripts/generate_config.py -o litellm_config.yaml && \
+	git diff --exit-code litellm_config.yaml && echo "✅ litellm_config.yaml is up to date with generate_config.py" || \
+	{ echo "❌ litellm_config.yaml was regenerated (drift fixed). Review and commit the change."; exit 1; }
 
 # ── Test ───────────────────────────────────────────────────────
 
