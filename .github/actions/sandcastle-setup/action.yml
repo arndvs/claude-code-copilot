@@ -1,0 +1,95 @@
+name: Sandcastle setup
+description: Shared pre-run setup for Sandcastle agent workflows.
+inputs:
+  trigger-label:
+    description: Pipeline label that triggered this workflow.
+    required: false
+  object-type:
+    description: GitHub object type carrying lifecycle labels.
+    required: false
+  object-number:
+    description: Issue or PR number carrying lifecycle labels.
+    required: false
+  token:
+    description: Token used to update labels.
+    required: true
+  repository:
+    description: GitHub repository, owner/name.
+    required: true
+  checkout-ref:
+    description: Ref to check out.
+    required: true
+  checkout-fetch-depth:
+    description: Checkout history depth.
+    required: false
+    default: "1"
+  checkout-token:
+    description: Optional token for repository checkout.
+    required: false
+    default: ""
+  skip-checkout:
+    description: Whether the caller has already checked out the desired ref.
+    required: false
+    default: "false"
+  node-version:
+    description: Node.js version used by the Sandcastle engine.
+    required: false
+    default: "22"
+  install-engine:
+    description: Whether to install Sandcastle engine dependencies.
+    required: false
+    default: "true"
+  manage-labels:
+    description: Whether to run lifecycle label transitions.
+    required: false
+    default: "true"
+runs:
+  using: composite
+  steps:
+    - name: Validate lifecycle inputs
+      if: ${{ inputs['manage-labels'] == 'true' && (inputs['trigger-label'] == '' || inputs['object-type'] == '' || inputs['object-number'] == '') }}
+      shell: bash
+      run: |
+        echo "sandcastle-setup requires trigger-label, object-type, and object-number when manage-labels is true." >&2
+        exit 1
+
+    - name: Transition labels
+      if: ${{ inputs['manage-labels'] == 'true' }}
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+      run: |
+        gh "${{ inputs['object-type'] }}" edit "${{ inputs['object-number'] }}" --remove-label "${{ inputs['trigger-label'] }}" -R "${{ inputs.repository }}" || true
+        gh "${{ inputs['object-type'] }}" edit "${{ inputs['object-number'] }}" --remove-label "agent:blocked" -R "${{ inputs.repository }}" || true
+        gh "${{ inputs['object-type'] }}" edit "${{ inputs['object-number'] }}" --add-label "agent:in-progress" -R "${{ inputs.repository }}"
+
+    - name: Checkout
+      if: ${{ inputs['skip-checkout'] != 'true' && inputs['checkout-token'] == '' }}
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs['checkout-ref'] }}
+        fetch-depth: ${{ inputs['checkout-fetch-depth'] }}
+
+    - name: Checkout with token
+      if: ${{ inputs['skip-checkout'] != 'true' && inputs['checkout-token'] != '' }}
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs['checkout-ref'] }}
+        fetch-depth: ${{ inputs['checkout-fetch-depth'] }}
+        token: ${{ inputs['checkout-token'] }}
+
+    - name: Set up Node.js
+      if: ${{ inputs['install-engine'] == 'true' }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs['node-version'] }}
+
+    - name: Install engine dependencies
+      if: ${{ inputs['install-engine'] == 'true' }}
+      shell: bash
+      run: |
+        echo "OUTPUT_DIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+        corepack enable
+        cd .sandcastle/engine
+        pnpm --ignore-workspace install --frozen-lockfile
+        echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"

@@ -6,7 +6,7 @@ import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
 import { runWithExtraction } from "../lib/run-with-extraction.js";
 import { UpdateBranchOutput } from "../schemas/update-branch-output.js";
 import { loadConfig } from "../lib/config.js";
-import { resolvePrompt, configPromptArgs } from "../lib/resolve-prompt.js";
+import { resolvePrompt, configPromptArgs, filterPromptArgs } from "../lib/resolve-prompt.js";
 import { fail, sh, shFile, shFileInherit } from "../lib/shell-helpers.js";
 import { resolveDefaultExtractionsDir, resolveDefaultTemplatesDir } from "../lib/default-template-paths.js";
 
@@ -70,12 +70,12 @@ export async function runUpdateBranch(opts: {
     sandbox: noSandbox(),
     cwd: repoDir,
     promptFile,
-    promptArgs: {
+    promptArgs: filterPromptArgs(promptFile, {
       ...configPromptArgs(config),
       PR_NUMBER: prNumber,
       BRANCH: branch,
       BASE_REF: baseRef,
-    },
+    }),
     output: Output.object({ tag: "output", schema: UpdateBranchOutput }),
     extractionPrompt,
     logging: { type: "stdout" },

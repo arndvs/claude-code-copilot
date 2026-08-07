@@ -8,18 +8,14 @@ name: "Sandcastle CI"
 on:
   push:
     paths:
-      - ".sandcastle/package.json"
-      - ".sandcastle/run.ts"
       - ".sandcastle/engine/**"
-      - ".sandcastle/package.json"
+      - ".sandcastle/engine/package.json"
       - ".sandcastle/run.ts"
       - ".github/workflows/sandcastle-ci.yml"
   pull_request:
     paths:
-      - ".sandcastle/package.json"
-      - ".sandcastle/run.ts"
       - ".sandcastle/engine/**"
-      - ".sandcastle/package.json"
+      - ".sandcastle/engine/package.json"
       - ".sandcastle/run.ts"
       - ".github/workflows/sandcastle-ci.yml"
   workflow_dispatch:
