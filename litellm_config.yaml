@@ -17,10 +17,10 @@ model_list:
   # FALLBACK (OpenRouter) deployment. router_settings.fallbacks wires them.
 
   # Sonnet 4.6 — Claude Code's default model
-  # Primary: GitHub Copilot
+  # Primary: GitHub Copilot (routed to opus-4.6 — opus-4.8 returns empty completions)
   - model_name: "claude-sonnet-4-6"
     litellm_params:
-      model: "github_copilot/claude-opus-4.8"
+      model: "github_copilot/claude-opus-4.6"
       stream: true
       extra_headers:
         Editor-Version: "vscode/1.106.3"
@@ -35,10 +35,10 @@ model_list:
       stream: true
 
   # Haiku — Copilot doesn't have Haiku; route to Sonnet as fallback
-  # Primary: GitHub Copilot
+  # Primary: GitHub Copilot (routed to opus-4.6 — opus-4.8 returns empty completions)
   - model_name: "claude-haiku-4-5-20251001"
     litellm_params:
-      model: "github_copilot/claude-opus-4.8"
+      model: "github_copilot/claude-opus-4.6"
       stream: true
       extra_headers:
         Editor-Version: "vscode/1.106.3"
@@ -71,10 +71,10 @@ model_list:
       stream: true
 
   # Opus 4.7
-  # Primary: GitHub Copilot
+  # Primary: GitHub Copilot (routed to opus-4.6 — opus-4.7 returns empty completions)
   - model_name: "claude-opus-4-7"
     litellm_params:
-      model: "github_copilot/claude-opus-4.7"
+      model: "github_copilot/claude-opus-4.6"
       stream: true
       extra_headers:
         Editor-Version: "vscode/1.106.3"
@@ -98,11 +98,9 @@ model_list:
         Editor-Plugin-Version: "copilot/1.388.0"
         Copilot-Integration-Id: "vscode-chat"
         User-Agent: "GithubCopilot/1.388.0"
-  - model_name: "*-fallback"
-    litellm_params:
-      model: "openrouter/*"
-      api_key: "os.environ/OPENROUTER_API_KEY"
-      stream: true
+  # Wildcard fallback removed: openrouter/* is not a concrete model and returns
+  # HTTP 400 (no_db_connection). Every named alias has an explicit concrete
+  # OpenRouter fallback above; unknown models have no fallback by design.
 
 general_settings:
   master_key: "os.environ/LITELLM_MASTER_KEY"
@@ -122,6 +120,4 @@ router_settings:
         - claude-opus-4-6-fallback
     - claude-opus-4-7:
         - claude-opus-4-7-fallback
-    - "*":
-        - "*-fallback"
 
