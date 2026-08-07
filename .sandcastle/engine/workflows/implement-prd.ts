@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { run, claudeCode } from "@ai-hero/sandcastle";
 import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
 import { loadConfig } from "../lib/config.js";
-import { resolvePrompt, configPromptArgs } from "../lib/resolve-prompt.js";
+import { resolvePrompt, configPromptArgs, filterPromptArgs } from "../lib/resolve-prompt.js";
 import { resolveDefaultTemplatesDir } from "../lib/default-template-paths.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -39,14 +39,14 @@ export async function runImplementPrd(opts: {
     sandbox: noSandbox(),
     cwd: opts.repoDir,
     promptFile,
-    promptArgs: {
+    promptArgs: filterPromptArgs(promptFile, {
       ...configPromptArgs(config),
       PRD_NUMBER: opts.prdNumber,
       PRD_TITLE: opts.prdTitle,
       SUB_ISSUE_NUMBER: opts.subIssueNumber,
       SUB_ISSUE_TITLE: opts.subIssueTitle,
       BRANCH: opts.branch,
-    },
+    }),
     logging: { type: "stdout" },
   });
 

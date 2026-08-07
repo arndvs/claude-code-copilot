@@ -172,6 +172,32 @@ detail_lines=$(printf '%s\n' "$out" | grep -c '^detail=.*status=ok.*http_code=20
   && pass "CR/LF in upstream error type cannot inject output keys" \
   || fail "CR/LF sanitization: expected one status line and flattened detail, got: $out"
 
+# ── 15. Auth header uses the real bearer token without logging it ─────────────
+AUTH_CAPTURE="$TMPDIR_ROOT/auth-header.txt"
+cat > "$STUB_DIR/curl" <<'STUB3'
+#!/usr/bin/env bash
+out=""; prev=""
+for arg in "$@"; do
+  [ "$prev" = "-o" ] && out="$arg"
+  if [ "$prev" = "-H" ] && [[ "$arg" == Authorization:* ]]; then
+    printf '%s' "$arg" > "${STUB_AUTH_CAPTURE:?}"
+  fi
+  prev="$arg"
+done
+[ -n "$out" ] && printf '%s' '{"content":[{"type":"text","text":"pong"}]}' > "$out"
+printf '200'
+STUB3
+chmod +x "$STUB_DIR/curl"
+auth_out=$(STUB_AUTH_CAPTURE="$AUTH_CAPTURE" \
+    PROBE_BASE_URL="http://proxy.test" PROBE_AUTH_TOKEN="secret-token" PROBE_MODEL="m" \
+    PROBE_MAX_RETRIES=1 PATH="$STUB_DIR:$PATH" bash "$PROBE" 2>/dev/null)
+auth_header="$(cat "$AUTH_CAPTURE" 2>/dev/null || true)"
+if [ "$auth_header" = "Authorization: Bearer secret-token" ] && ! printf '%s\n' "$auth_out" | grep -qF "secret-token"; then
+  pass "Authorization header sends bearer token without emitting it"
+else
+  fail "Authorization header: expected bearer token captured and no token in output"
+fi
+
 echo ""
 printf "  \033[32m%d passed\033[0m  \033[31m%d failed\033[0m\n" "$PASS" "$FAIL"
 if [ "$FAIL" -gt 0 ]; then

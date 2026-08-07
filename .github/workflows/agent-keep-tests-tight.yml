@@ -1,0 +1,196 @@
+name: "Agent: Keep Tests Tight"
+
+on:
+  schedule:
+    # 03:00 UTC, Monday-Friday. GitHub may delay scheduled runs under load.
+    - cron: "0 3 * * 1-5"
+  workflow_dispatch:
+
+jobs:
+  keep-tests-tight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    concurrency:
+      group: agent-keep-tests-tight
+      cancel-in-progress: false
+
+    permissions:
+      contents: write
+      pull-requests: write
+
+    env:
+      GITHUB_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+
+    steps:
+      - name: Checkout workflow actions
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+
+      - name: Proxy preflight
+        id: proxy-preflight
+        env:
+          ANTHROPIC_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.LITELLM_MASTER_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: bash .sandcastle/scripts/proxy_preflight.sh
+
+      - name: Stop when proxy preflight skips
+        if: steps.proxy-preflight.outputs.should_run != 'true'
+        run: |
+          echo "Proxy preflight skipped agent run: ${{ steps.proxy-preflight.outputs.reason }}. ${{ steps.proxy-preflight.outputs.detail }}" > "${RUNNER_TEMP}/failure_reason.txt"
+          exit 1
+
+      - name: Sandcastle setup
+        if: steps.proxy-preflight.outputs.should_run == 'true'
+        uses: ./.github/actions/sandcastle-setup
+        with:
+          checkout-ref: dev
+          checkout-fetch-depth: 0
+          skip-checkout: true
+          token: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          manage-labels: false
+
+      - name: Compute branch name
+        if: steps.proxy-preflight.outputs.should_run == 'true'
+        id: branch
+        run: |
+          set -euo pipefail
+          branch="agent/keep-tests-tight-$(date +%F)"
+          echo "name=$branch" >> "$GITHUB_OUTPUT"
+
+      - name: Set up git identity and branch
+        if: steps.proxy-preflight.outputs.should_run == 'true'
+        env:
+          BRANCH: ${{ steps.branch.outputs.name }}
+        run: |
+          set -euo pipefail
+          git config user.name "claude-code[bot]"
+          git config user.email "claude-code[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            git fetch origin "$BRANCH"
+            git checkout -B "$BRANCH" "origin/$BRANCH"
+          else
+            git checkout -b "$BRANCH"
+          fi
+
+      - name: Run keep-tests-tight
+        if: steps.proxy-preflight.outputs.should_run == 'true'
+        env:
+          ANTHROPIC_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.LITELLM_MASTER_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set -euo pipefail
+          cd .sandcastle/engine
+          max_attempts=2
+          for attempt in $(seq 1 "$max_attempts"); do
+            echo "Keep-tests-tight attempt $attempt/$max_attempts"
+            if pnpm --ignore-workspace exec tsx ../run.ts keep-tests-tight --branch "${{ steps.branch.outputs.name }}"; then
+              exit 0
+            fi
+            if [ "$attempt" -lt "$max_attempts" ]; then
+              echo "::warning::Keep-tests-tight attempt $attempt failed; retrying once in 30 seconds."
+              sleep 30
+            fi
+          done
+          echo "Keep-tests-tight failed after $max_attempts attempts."
+          exit 1
+
+      - name: Push branch
+        if: steps.proxy-preflight.outputs.should_run == 'true' && success()
+        env:
+          BRANCH: ${{ steps.branch.outputs.name }}
+          OUTPUT_FILE: ${{ runner.temp }}/keep_tests_tight_output.json
+        run: |
+          set -euo pipefail
+          if [ ! -f "$OUTPUT_FILE" ]; then
+            echo "No output file produced — nothing to push."
+            exit 0
+          fi
+          status=$(jq -r '.status' "$OUTPUT_FILE")
+          if [ "$status" != "changed" ]; then
+            echo "Status is '$status' — nothing to push."
+            exit 0
+          fi
+          git push origin "$BRANCH"
+
+      - name: Open draft PR
+        if: steps.proxy-preflight.outputs.should_run == 'true' && success()
+        env:
+          BRANCH: ${{ steps.branch.outputs.name }}
+          OUTPUT_FILE: ${{ runner.temp }}/keep_tests_tight_output.json
+        run: |
+          set -euo pipefail
+          if [ ! -f "$OUTPUT_FILE" ]; then
+            echo "No output file produced — nothing to open."
+            exit 0
+          fi
+          status=$(jq -r '.status' "$OUTPUT_FILE")
+          if [ "$status" != "changed" ]; then
+            echo "Status is '$status' — no PR to open."
+            exit 0
+          fi
+
+          existing_pr=$(gh pr list -R ${{ github.repository }} --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$existing_pr" ]; then
+            echo "PR #${existing_pr} already exists for $BRANCH"
+            gh pr edit "$existing_pr" -R ${{ github.repository }} --add-label "source:keep-tests-tight" >/dev/null 2>&1 || true
+            exit 0
+          fi
+
+          summary=$(jq -r '.summary' "$OUTPUT_FILE")
+          diffstat=$(jq -r '.diffStat' "$OUTPUT_FILE")
+          PR_TITLE="chore(tests): keep tests tight ($(date +%F))"
+          {
+            echo "$summary"
+            echo ""
+            echo "## Diff stat"
+            echo ""
+            echo '```'
+            echo "$diffstat"
+            echo '```'
+          } > "${RUNNER_TEMP}/pr_body.md"
+
+          gh pr create \
+            -R ${{ github.repository }} \
+            --draft \
+            --base dev \
+            --head "$BRANCH" \
+            --title "$PR_TITLE" \
+            --body-file "${RUNNER_TEMP}/pr_body.md" \
+            --label "source:keep-tests-tight"
+
+      - name: Summarise run
+        if: always()
+        env:
+          OUTPUT_FILE: ${{ runner.temp }}/keep_tests_tight_output.json
+        run: |
+          if [ ! -f "$OUTPUT_FILE" ]; then
+            echo "No output file produced — agent likely crashed before emitting a result."
+            exit 0
+          fi
+
+          status=$(jq -r '.status' "$OUTPUT_FILE")
+          {
+            echo "## Keep tests tight"
+            echo ""
+            if [ "$status" = "changed" ]; then
+              summary=$(jq -r '.summary' "$OUTPUT_FILE")
+              echo "$summary"
+              echo ""
+              echo "### Removed"
+              jq -r '.removed[] | "- \(.)"' "$OUTPUT_FILE"
+              echo ""
+              echo "### Consolidated"
+              jq -r '.consolidated[] | "- \(.)"' "$OUTPUT_FILE"
+              echo ""
+              echo "### Kept"
+              jq -r '.kept[] | "- \(.)"' "$OUTPUT_FILE"
+            elif [ "$status" = "no-changes" ]; then
+              reason=$(jq -r '.reason' "$OUTPUT_FILE")
+              echo "**No changes — $reason.**"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

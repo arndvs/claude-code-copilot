@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     concurrency:
-      group: agent-implement-prd-${{ github.event.issue.number }}
+      group: sandcastle-issue-${{ github.event.issue.number }}
       cancel-in-progress: false
 
     permissions:
@@ -21,7 +21,7 @@ jobs:
     env:
       PRD_NUMBER: ${{ github.event.issue.number }}
       PRD_TITLE: ${{ github.event.issue.title }}
-      GH_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
       GH_REPO: ${{ github.repository }}
 
     steps:
@@ -114,15 +114,44 @@ jobs:
           gh issue edit "$PRD_NUMBER" --add-label "agent:blocked" || true
           gh issue comment "$PRD_NUMBER" --body "Refused to run: all sub-issues are already closed; nothing to implement. If you want to do more work on this PRD, reopen or add a sub-issue first."
 
-      - name: Transition labels — PRD into in-progress
+      - name: Checkout workflow actions
         if: steps.shape.outputs.mode == 'run'
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+
+      - name: Proxy preflight
+        if: steps.shape.outputs.mode == 'run'
+        id: proxy-preflight
+        env:
+          ANTHROPIC_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.LITELLM_MASTER_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: bash .sandcastle/scripts/proxy_preflight.sh
+
+      - name: Sandcastle setup
+        if: steps.shape.outputs.mode == 'run'
+        uses: ./.github/actions/sandcastle-setup
+        with:
+          trigger-label: agent:implement-prd
+          object-type: issue
+          object-number: ${{ env.PRD_NUMBER }}
+          checkout-ref: dev
+          checkout-fetch-depth: 0
+          skip-checkout: ${{ steps.proxy-preflight.outputs.should_run != 'true' }}
+          install-engine: ${{ steps.proxy-preflight.outputs.should_run }}
+          checkout-token: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+
+      - name: Stop when proxy preflight skips
+        if: steps.shape.outputs.mode == 'run' && steps.proxy-preflight.outputs.should_run != 'true'
         run: |
-          gh issue edit "$PRD_NUMBER" --remove-label "agent:implement-prd" || true
-          gh issue edit "$PRD_NUMBER" --remove-label "agent:blocked" || true
-          gh issue edit "$PRD_NUMBER" --add-label "agent:in-progress" || true
+          echo "Proxy preflight skipped agent run: ${{ steps.proxy-preflight.outputs.reason }}. ${{ steps.proxy-preflight.outputs.detail }}" > "${RUNNER_TEMP}/failure_reason.txt"
+          exit 1
 
       - name: Compute branch name
-        if: steps.shape.outputs.mode == 'run'
+        if: steps.proxy-preflight.outputs.should_run == 'true' && steps.shape.outputs.mode == 'run'
         id: branch
         run: |
           set -euo pipefail
@@ -133,16 +162,8 @@ jobs:
           branch="agent/prd-${PRD_NUMBER}-${slug}"
           echo "name=$branch" >> "$GITHUB_OUTPUT"
 
-      - name: Checkout code
-        if: steps.shape.outputs.mode == 'run'
-        uses: actions/checkout@v4
-        with:
-          ref: dev
-          fetch-depth: 0
-          token: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
-
       - name: Set up git identity and resume/create branch
-        if: steps.shape.outputs.mode == 'run'
+        if: steps.proxy-preflight.outputs.should_run == 'true' && steps.shape.outputs.mode == 'run'
         id: branchstate
         env:
           BRANCH: ${{ steps.branch.outputs.name }}
@@ -159,30 +180,17 @@ jobs:
             echo "is_first=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Set up Node.js
-        if: steps.shape.outputs.mode == 'run'
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Install engine dependencies
-        if: steps.shape.outputs.mode == 'run'
-        run: |
-          corepack enable
-          cd .sandcastle/engine
-          pnpm install --frozen-lockfile
-          echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
-
       - name: Run implement-prd
-        if: steps.shape.outputs.mode == 'run'
+        if: steps.proxy-preflight.outputs.should_run == 'true' && steps.shape.outputs.mode == 'run'
         id: implement
         env:
           ANTHROPIC_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.LITELLM_MASTER_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           BRANCH: ${{ steps.branch.outputs.name }}
-          OUTPUT_DIR: ${{ runner.temp }}
         run: |
-          ./.sandcastle/engine/node_modules/.bin/tsx .sandcastle/run.ts implement-prd \
+          cd .sandcastle/engine
+          pnpm --ignore-workspace exec tsx ../run.ts implement-prd \
             --prd-number "$PRD_NUMBER" \
             --prd-title "$PRD_TITLE" \
             --sub-issue-number "${{ steps.shape.outputs.next_open_number }}" \
@@ -190,13 +198,13 @@ jobs:
             --branch "$BRANCH"
 
       - name: Push branch
-        if: steps.shape.outputs.mode == 'run' && success()
+        if: steps.proxy-preflight.outputs.should_run == 'true' && steps.shape.outputs.mode == 'run' && success()
         env:
           BRANCH: ${{ steps.branch.outputs.name }}
         run: git push origin "$BRANCH"
 
       - name: Check whether a PR already exists for this branch
-        if: steps.shape.outputs.mode == 'run' && success()
+        if: steps.proxy-preflight.outputs.should_run == 'true' && steps.shape.outputs.mode == 'run' && success()
         id: pr_lookup
         env:
           BRANCH: ${{ steps.branch.outputs.name }}
@@ -206,18 +214,19 @@ jobs:
           echo "existing_pr=$existing_pr" >> "$GITHUB_OUTPUT"
 
       - name: Write PR title and description (only when opening a new PR)
-        if: steps.shape.outputs.mode == 'run' && success() && steps.pr_lookup.outputs.existing_pr == ''
+        if: steps.proxy-preflight.outputs.should_run == 'true' && steps.shape.outputs.mode == 'run' && success() && steps.pr_lookup.outputs.existing_pr == ''
         env:
           ANTHROPIC_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.LITELLM_MASTER_KEY }}
-          OUTPUT_DIR: ${{ runner.temp }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          ./.sandcastle/engine/node_modules/.bin/tsx .sandcastle/run.ts write-prd-pr \
+          cd .sandcastle/engine
+          pnpm --ignore-workspace exec tsx ../run.ts write-prd-pr \
             --prd-number "$PRD_NUMBER" \
             --prd-title "$PRD_TITLE"
 
       - name: Open draft PR if one doesn't exist for this branch
-        if: steps.shape.outputs.mode == 'run' && success()
+        if: steps.proxy-preflight.outputs.should_run == 'true' && steps.shape.outputs.mode == 'run' && success()
         id: open_pr
         env:
           BRANCH: ${{ steps.branch.outputs.name }}
@@ -243,7 +252,7 @@ jobs:
           fi
 
       - name: Close completed sub-issue
-        if: steps.shape.outputs.mode == 'run' && success()
+        if: steps.proxy-preflight.outputs.should_run == 'true' && steps.shape.outputs.mode == 'run' && success()
         env:
           SUB_ISSUE_NUMBER: ${{ steps.shape.outputs.next_open_number }}
         run: |
@@ -251,7 +260,7 @@ jobs:
           gh issue close "$SUB_ISSUE_NUMBER" --comment "Implemented in ${commit_sha}. Part of #${PRD_NUMBER}."
 
       - name: Re-check remaining open sub-issues
-        if: steps.shape.outputs.mode == 'run' && success()
+        if: steps.proxy-preflight.outputs.should_run == 'true' && steps.shape.outputs.mode == 'run' && success()
         id: remaining
         env:
           SUB_ISSUE_NUMBER: ${{ steps.shape.outputs.next_open_number }}
@@ -267,67 +276,72 @@ jobs:
           fi
 
       - name: Chain — re-label PRD to pick up next sub-issue
-        if: steps.shape.outputs.mode == 'run' && success() && steps.remaining.outputs.count != '0'
+        if: steps.proxy-preflight.outputs.should_run == 'true' && steps.shape.outputs.mode == 'run' && success() && steps.remaining.outputs.count != '0'
         env:
           AGENT_PAT: ${{ secrets.AGENT_PAT }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ -z "$AGENT_PAT" ]; then
             echo "AGENT_PAT is required to add agent:implement-prd because GITHUB_TOKEN-created labels do not trigger workflows." > "${RUNNER_TEMP}/failure_reason.txt"
-            gh issue edit "$PRD_NUMBER" --add-label "agent:blocked" || true
             exit 1
           fi
           GH_TOKEN="$AGENT_PAT" gh issue edit "$PRD_NUMBER" --add-label "agent:implement-prd" || {
             status=$?
             echo "AGENT_PAT failed to add agent:implement-prd (status $status)." > "${RUNNER_TEMP}/failure_reason.txt"
-            gh issue edit "$PRD_NUMBER" --add-label "agent:blocked" || true
             exit "$status"
           }
 
-      - name: Hand off — request review on the PR
-        if: steps.shape.outputs.mode == 'run' && success() && steps.remaining.outputs.count == '0'
+      - name: Hand off — mark PR ready for Copilot review
+        if: steps.proxy-preflight.outputs.should_run == 'true' && steps.shape.outputs.mode == 'run' && success() && steps.remaining.outputs.count == '0'
         env:
           PR_NUMBER: ${{ steps.open_pr.outputs.pr_number }}
           AGENT_PAT: ${{ secrets.AGENT_PAT }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          if is_draft=$(gh pr view "$PR_NUMBER" -R "$GH_REPO" --json isDraft --jq '.isDraft'); then
+            :
+          else
+            status=$?
+            echo "Failed to determine draft state for PR #${PR_NUMBER} (status $status)." > "${RUNNER_TEMP}/failure_reason.txt"
+            exit "$status"
+          fi
+          if [ "$is_draft" != "true" ]; then
+            echo "PR #${PR_NUMBER} is already ready for review."
+            exit 0
+          fi
           if [ -z "$AGENT_PAT" ]; then
-            echo "AGENT_PAT is required to add agent:review because GITHUB_TOKEN-created labels do not trigger workflows." > "${RUNNER_TEMP}/failure_reason.txt"
-            gh issue edit "$PRD_NUMBER" --add-label "agent:blocked" || true
+            echo "AGENT_PAT is required to mark the PR ready because GITHUB_TOKEN-created ready_for_review events do not trigger workflows." > "${RUNNER_TEMP}/failure_reason.txt"
             exit 1
           fi
-          GH_TOKEN="$AGENT_PAT" gh pr edit -R "$GH_REPO" "$PR_NUMBER" --add-label "agent:review" || {
+          GH_TOKEN="$AGENT_PAT" gh pr ready -R "$GH_REPO" "$PR_NUMBER" || {
             status=$?
-            echo "AGENT_PAT failed to add agent:review (status $status)." > "${RUNNER_TEMP}/failure_reason.txt"
-            gh issue edit "$PRD_NUMBER" --add-label "agent:blocked" || true
+            echo "AGENT_PAT failed to mark PR #${PR_NUMBER} ready for review (status $status)." > "${RUNNER_TEMP}/failure_reason.txt"
             exit "$status"
           }
 
-      - name: Mark blocked on failure
-        if: steps.shape.outputs.mode == 'run' && failure()
+      - name: Comment on failed sub-issue
+        if: steps.proxy-preflight.outputs.should_run == 'true' && steps.shape.outputs.mode == 'run' && failure() && steps.shape.outputs.next_open_number != ''
         env:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           SUB_ISSUE_NUMBER: ${{ steps.shape.outputs.next_open_number }}
         run: |
-          reason="(no reason file written — check workflow logs)"
-          if [ -f "${RUNNER_TEMP}/failure_reason.txt" ]; then
-            reason=$(cat "${RUNNER_TEMP}/failure_reason.txt")
-          fi
-          gh issue edit "$PRD_NUMBER" --add-label "agent:blocked" || true
-          gh issue comment "$PRD_NUMBER" --body "$(cat <<EOF
-          \`agent:implement-prd\` run failed while implementing sub-issue #${SUB_ISSUE_NUMBER}.
+          gh issue comment "$SUB_ISSUE_NUMBER" --body "Implementation attempt failed. See PRD #${PRD_NUMBER} for status. Workflow run: $RUN_URL" || true
 
-          **Reason:** $reason
-
-          **Workflow run:** $RUN_URL
-
-          Once the cause is resolved, remove \`agent:blocked\` and re-add \`agent:implement-prd\` to retry from this sub-issue.
-          EOF
-          )"
-          if [ -n "${SUB_ISSUE_NUMBER:-}" ]; then
-            gh issue comment "$SUB_ISSUE_NUMBER" --body "Implementation attempt failed. See PRD #${PRD_NUMBER} for status. Workflow run: $RUN_URL" || true
-          fi
-
-      - name: Always remove in-progress from PRD
+      - name: Restore workflow actions
         if: always() && steps.shape.outputs.mode == 'run'
-        run: gh issue edit "$PRD_NUMBER" --remove-label "agent:in-progress" || true
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+
+      - name: Sandcastle teardown
+        if: always() && steps.shape.outputs.mode == 'run'
+        uses: ./.github/actions/sandcastle-teardown
+        with:
+          trigger-label: agent:implement-prd
+          object-type: issue
+          object-number: ${{ env.PRD_NUMBER }}
+          token: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          job-status: ${{ job.status }}
+          failure-context: "${{ steps.shape.outputs.next_open_number != '' && format('while implementing sub-issue #{0}', steps.shape.outputs.next_open_number) || '' }}"

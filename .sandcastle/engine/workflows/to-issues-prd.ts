@@ -4,7 +4,7 @@ import { Output, claudeCode } from "@ai-hero/sandcastle";
 import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
 import { PrdSlicesOutput } from "../schemas/prd-slices-output.js";
 import { loadConfig } from "../lib/config.js";
-import { resolvePrompt, configPromptArgs } from "../lib/resolve-prompt.js";
+import { resolvePrompt, configPromptArgs, filterPromptArgs } from "../lib/resolve-prompt.js";
 import { runWithRetry } from "../lib/run-with-retry.js";
 import { resolveDefaultTemplatesDir } from "../lib/default-template-paths.js";
 import { shFile } from "../lib/shell-helpers.js";
@@ -56,10 +56,10 @@ export async function runToIssuesPrd(opts: { issueNumber: string; repoDir: strin
     sandbox: noSandbox(),
     cwd: repoDir,
     promptFile,
-    promptArgs: {
+    promptArgs: filterPromptArgs(promptFile, {
       ...configPromptArgs(config),
       ISSUE_NUMBER: issueNumber,
-    },
+    }),
     output: Output.object({ tag: "output", schema: PrdSlicesOutput }),
     logging: { type: "stdout" },
   });

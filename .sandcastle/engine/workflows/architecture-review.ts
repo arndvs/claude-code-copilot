@@ -6,7 +6,7 @@ import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
 import { runWithExtraction } from "../lib/run-with-extraction.js";
 import { ArchitectureReviewOutput } from "../schemas/architecture-review-output.js";
 import { loadConfig } from "../lib/config.js";
-import { resolvePrompt, configPromptArgs } from "../lib/resolve-prompt.js";
+import { resolvePrompt, configPromptArgs, filterPromptArgs } from "../lib/resolve-prompt.js";
 import { resolveDefaultExtractionsDir, resolveDefaultTemplatesDir } from "../lib/default-template-paths.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -35,7 +35,7 @@ export async function runArchitectureReview(opts: {
     sandbox: noSandbox(),
     cwd: opts.repoDir,
     promptFile,
-    promptArgs: configPromptArgs(config),
+    promptArgs: filterPromptArgs(promptFile, configPromptArgs(config)),
     output: Output.object({ tag: "output", schema: ArchitectureReviewOutput }),
     extractionPrompt,
     logging: { type: "stdout" },

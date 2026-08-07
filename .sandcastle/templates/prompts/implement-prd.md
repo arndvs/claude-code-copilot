@@ -24,7 +24,7 @@ Do not touch work that belongs to a different sub-issue.
 
 # CONTEXT
 
-Read `CONTEXT.md` and any relevant ADRs under `docs/adr/` before starting.
+Read `{{CONTEXT_DOC}}` and any relevant ADRs under `{{ADR_DIR}}` before starting.
 Explore the repo and fill your context with the parts relevant to this
 sub-issue — especially test files that touch the area you'll change.
 

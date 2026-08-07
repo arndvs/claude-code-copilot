@@ -13,6 +13,7 @@ const SandcastleConfigSchema = z.object({
   }).default("none"),
   promptDir: z.string().default(".sandcastle/prompts"),
   codingStandards: z.string().default(".sandcastle/CODING_STANDARDS.md"),
+  testingPrinciples: z.string().default(".sandcastle/testing-principles.md"),
   contextDoc: z.string().default("CONTEXT.md"),
   adrDir: z.string().default("docs/adr"),
   packageManager: z.enum(["npm", "pnpm", "yarn", "bun"]).default("pnpm"),

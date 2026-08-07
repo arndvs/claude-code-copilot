@@ -15,7 +15,7 @@ import { deferToIssue } from "../lib/defer-to-issue.js";
 import { postRoundSummary } from "../lib/round-summary.js";
 import { requestCopilotReview } from "../lib/request-review.js";
 import { loadConfig } from "../lib/config.js";
-import { resolvePrompt, configPromptArgs } from "../lib/resolve-prompt.js";
+import { resolvePrompt, configPromptArgs, filterPromptArgs } from "../lib/resolve-prompt.js";
 import { resolveThreads } from "../lib/resolve-threads.js";
 import type { ScoredComment, Tier } from "../lib/types.js";
 import { resolveDefaultTemplatesDir } from "../lib/default-template-paths.js";
@@ -143,12 +143,12 @@ async function runAddressReviewRound(opts: AddressReviewOpts): Promise<Omit<Addr
         sandbox: noSandbox(),
         cwd: repoDir,
         promptFile,
-        promptArgs: {
+        promptArgs: filterPromptArgs(promptFile, {
           ...configPromptArgs(config),
           PR_NUMBER: prNumber,
           BRANCH: getBranch({ prNumber, cwd: repoDir }),
           COMMENTS_JSON: JSON.stringify(commentsPayload, null, 2),
-        },
+        }),
         completionSignal: "<promise>COMPLETE</promise>",
         logging: { type: "stdout" },
       });
