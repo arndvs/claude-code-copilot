@@ -7,7 +7,7 @@ help:
 	@echo "claude-code-copilot"
 	@echo "─────────────────────────────────────────"
 	@echo "  make setup               Set up .env with generated keys"
-  @echo "  make start               Start LiteLLM proxy (OpenRouter primary, Copilot fallback)"
+	@echo "  make start               Start LiteLLM proxy (OpenRouter primary, Copilot fallback)"
 	@echo "  make stop                Stop the proxy"
 	@echo "  make test                Test proxy is working (non-streaming)"
 	@echo "  make test-stream         Test proxy streaming (SSE) response"
@@ -57,7 +57,7 @@ start:
 	PORT=$${LITELLM_PORT:-$(PORT)} && \
 	LITELLM_VERSION=$$(cat .litellm-version 2>/dev/null || echo '') && \
 	if [ -z "$$LITELLM_VERSION" ]; then echo "❌ Could not read LiteLLM version from .litellm-version. Create it (e.g. 'echo 1.89.1 > .litellm-version') before starting."; exit 1; fi && \
-  echo "Starting LiteLLM proxy (OpenRouter primary, GitHub Copilot fallback) on port $$PORT..." && \
+	echo "Starting LiteLLM proxy (OpenRouter primary, GitHub Copilot fallback) on port $$PORT..." && \
 	UV_NATIVE_TLS=$${UV_NATIVE_TLS:-true} \
 	PYTHONPATH=.$${PYTHONPATH:+:$$PYTHONPATH} \
 	uv run \
