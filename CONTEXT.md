@@ -1,21 +1,28 @@
 # CONTEXT.md — claude-code-copilot
 
-## 1. LiteLLM → Copilot routing (with OpenRouter fallback)
+## 1. LiteLLM → Copilot routing (with OpenRouter primary)
 
 LiteLLM translates Anthropic Messages API calls into GitHub Copilot API calls.
-`litellm_config.yaml` maps Claude Code's hyphenated model names to Copilot's dotted names.
-Each alias has a **primary** (GitHub Copilot) and a **fallback** (OpenRouter) deployment,
-wired via `router_settings.fallbacks` so the proxy stays up if Copilot fails.
+`litellm_config.yaml` maps Claude Code's hyphenated model names to concrete upstream models.
+Each alias has a **primary** (OpenRouter) and a **fallback** (GitHub Copilot) deployment,
+wired via `router_settings.fallbacks` so the proxy stays up if OpenRouter fails.
 
-| Alias (Claude Code sends) | Primary (Copilot) | Fallback (OpenRouter) |
+OpenRouter is the **default upstream**. GitHub Copilot's Claude models were returning
+empty-200 ('no choices') completions through the proxy — which LiteLLM treats as *success*
+and therefore never fails over. OpenRouter serves real completions reliably, so every
+concrete alias defaults to a concrete `openrouter/...` model, with Copilot as the automatic
+fallback lane. The dual-provider structure is preserved: flipping orientations is a config
+edit, not a code change.
+
+| Alias (Claude Code sends) | Primary (OpenRouter) | Fallback (Copilot) |
 |---|---|---|
-| `claude-sonnet-4-6` | `github_copilot/claude-opus-4.8` | `openrouter/deepseek/deepseek-v4-flash-0731` |
-| `claude-haiku-4-5-20251001` | `github_copilot/claude-opus-4.8` (Copilot has no Haiku) | `openrouter/deepseek/deepseek-v4-flash-0731` |
-| `claude-opus-4-6` | `github_copilot/claude-opus-4.6` | `openrouter/deepseek/deepseek-v4-flash-0731` |
-| `claude-opus-4-7` | `github_copilot/claude-opus-4.7` | `openrouter/deepseek/deepseek-v4-flash-0731` |
-| `*` (wildcard) | `github_copilot/*` — catch-all pass-through | `openrouter/*` |
+| `claude-sonnet-4-6` | `openrouter/deepseek/deepseek-v4-flash-0731` | `github_copilot/claude-opus-4.8` |
+| `claude-haiku-4-5-20251001` | `openrouter/deepseek/deepseek-v4-flash-0731` | `github_copilot/claude-opus-4.8` (Copilot has no Haiku) |
+| `claude-opus-4-6` | `openrouter/deepseek/deepseek-v4-flash-0731` | `github_copilot/claude-opus-4.6` |
+| `claude-opus-4-7` | `openrouter/deepseek/deepseek-v4-flash-0731` | `github_copilot/claude-opus-4.7` |
+| `*` (wildcard) | `openrouter/deepseek/deepseek-v4-flash-0731` (concrete) | `github_copilot/*` — catch-all pass-through |
 
-Primary entries carry the four editor headers Copilot validates; fallback entries carry an `api_key` referencing the OpenRouter key from the environment.
+Primary entries carry an `api_key` referencing the OpenRouter key from the environment; fallback entries carry the four editor headers Copilot validates.
 
 **Auth boundary.** `general_settings.master_key` reads from `LITELLM_MASTER_KEY` env var. Claude Code authenticates to LiteLLM with this key; LiteLLM authenticates to Copilot with the OAuth token cached at `~/.config/litellm/github_copilot/`, and to OpenRouter with `OPENROUTER_API_KEY`. The credentials never cross.
 

@@ -13,30 +13,40 @@ litellm_settings:
 
 model_list:
   # Claude Code sends hyphenated names; Copilot uses dotted names, OpenRouter
-  # uses provider/model IDs. Each alias has a PRIMARY (GitHub Copilot) and a
-  # FALLBACK (OpenRouter) deployment. router_settings.fallbacks wires them.
+  # uses provider/model IDs. Each alias has a PRIMARY (OpenRouter) and a
+  # FALLBACK (GitHub Copilot) deployment. router_settings.fallbacks wires them.
+  # OpenRouter is the default upstream: it serves real completions reliably,
+  # while Copilot's Claude models have been returning empty-200 ('no choices')
+  # responses that LiteLLM treats as success (no fallback). Copilot remains the
+  # automatic fallback lane per alias.
 
   # Sonnet 4.6 — Claude Code's default model
-  # Primary: GitHub Copilot
+  # Primary: OpenRouter
   - model_name: "claude-sonnet-4-6"
     litellm_params:
-      model: "github_copilot/claude-opus-4.8"
+      model: "openrouter/deepseek/deepseek-v4-flash-0731"
+      api_key: "os.environ/OPENROUTER_API_KEY"
       stream: true
-      extra_headers:
-        Editor-Version: "vscode/1.106.3"
-        Editor-Plugin-Version: "copilot/1.388.0"
-        Copilot-Integration-Id: "vscode-chat"
-        User-Agent: "GithubCopilot/1.388.0"
-  # Fallback: OpenRouter
+  # Fallback: GitHub Copilot
   - model_name: "claude-sonnet-4-6-fallback"
     litellm_params:
+      model: "github_copilot/claude-opus-4.8"
+      stream: true
+      extra_headers:
+        Editor-Version: "vscode/1.106.3"
+        Editor-Plugin-Version: "copilot/1.388.0"
+        Copilot-Integration-Id: "vscode-chat"
+        User-Agent: "GithubCopilot/1.388.0"
+
+  # Haiku — OpenRouter serves Haiku directly; Copilot has no Haiku (routes to Opus)
+  # Primary: OpenRouter
+  - model_name: "claude-haiku-4-5-20251001"
+    litellm_params:
       model: "openrouter/deepseek/deepseek-v4-flash-0731"
       api_key: "os.environ/OPENROUTER_API_KEY"
       stream: true
-
-  # Haiku — Copilot doesn't have Haiku; route to Sonnet as fallback
-  # Primary: GitHub Copilot
-  - model_name: "claude-haiku-4-5-20251001"
+  # Fallback: GitHub Copilot (no Haiku → Opus)
+  - model_name: "claude-haiku-4-5-20251001-fallback"
     litellm_params:
       model: "github_copilot/claude-opus-4.8"
       stream: true
@@ -45,16 +55,16 @@ model_list:
         Editor-Plugin-Version: "copilot/1.388.0"
         Copilot-Integration-Id: "vscode-chat"
         User-Agent: "GithubCopilot/1.388.0"
-  # Fallback: OpenRouter
-  - model_name: "claude-haiku-4-5-20251001-fallback"
+
+  # Opus 4.6
+  # Primary: OpenRouter
+  - model_name: "claude-opus-4-6"
     litellm_params:
       model: "openrouter/deepseek/deepseek-v4-flash-0731"
       api_key: "os.environ/OPENROUTER_API_KEY"
       stream: true
-
-  # Opus 4.6
-  # Primary: GitHub Copilot
-  - model_name: "claude-opus-4-6"
+  # Fallback: GitHub Copilot
+  - model_name: "claude-opus-4-6-fallback"
     litellm_params:
       model: "github_copilot/claude-opus-4.6"
       stream: true
@@ -63,16 +73,16 @@ model_list:
         Editor-Plugin-Version: "copilot/1.388.0"
         Copilot-Integration-Id: "vscode-chat"
         User-Agent: "GithubCopilot/1.388.0"
-  # Fallback: OpenRouter
-  - model_name: "claude-opus-4-6-fallback"
+
+  # Opus 4.7
+  # Primary: OpenRouter
+  - model_name: "claude-opus-4-7"
     litellm_params:
       model: "openrouter/deepseek/deepseek-v4-flash-0731"
       api_key: "os.environ/OPENROUTER_API_KEY"
       stream: true
-
-  # Opus 4.7
-  # Primary: GitHub Copilot
-  - model_name: "claude-opus-4-7"
+  # Fallback: GitHub Copilot
+  - model_name: "claude-opus-4-7-fallback"
     litellm_params:
       model: "github_copilot/claude-opus-4.7"
       stream: true
@@ -81,15 +91,16 @@ model_list:
         Editor-Plugin-Version: "copilot/1.388.0"
         Copilot-Integration-Id: "vscode-chat"
         User-Agent: "GithubCopilot/1.388.0"
-  # Fallback: OpenRouter
-  - model_name: "claude-opus-4-7-fallback"
+
+  # Wildcard — primary OpenRouter, fallback Copilot. Concrete wildcard only:
+  # openrouter/* is not a real model (400 no_db_connection), so the catch-all
+  # defaults to the Copilot pass-through and Copilot is the fallback for it.
+  - model_name: "*"
     litellm_params:
       model: "openrouter/deepseek/deepseek-v4-flash-0731"
       api_key: "os.environ/OPENROUTER_API_KEY"
       stream: true
-
-  # Wildcard fallback — primary Copilot, fallback OpenRouter
-  - model_name: "*"
+  - model_name: "*-fallback"
     litellm_params:
       model: "github_copilot/*"
       stream: true
@@ -98,11 +109,6 @@ model_list:
         Editor-Plugin-Version: "copilot/1.388.0"
         Copilot-Integration-Id: "vscode-chat"
         User-Agent: "GithubCopilot/1.388.0"
-  - model_name: "*-fallback"
-    litellm_params:
-      model: "openrouter/*"
-      api_key: "os.environ/OPENROUTER_API_KEY"
-      stream: true
 
 general_settings:
   master_key: "os.environ/LITELLM_MASTER_KEY"

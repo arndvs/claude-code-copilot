@@ -19,7 +19,7 @@ if [[ -z "${LITELLM_MASTER_KEY:-}" ]]; then
   exit 1
 fi
 
-echo "Starting LiteLLM proxy (GitHub Copilot primary, OpenRouter fallback) on port ${PORT}..."
+echo "Starting LiteLLM proxy (OpenRouter primary, GitHub Copilot fallback) on port ${PORT}..."
 echo ""
 echo "After the proxy starts, configure Claude Code:"
 echo ""
