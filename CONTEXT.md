@@ -16,11 +16,12 @@ edit, not a code change.
 
 | Alias (Claude Code sends) | Primary (OpenRouter) | Fallback (Copilot) |
 |---|---|---|
-| `claude-sonnet-4-6` | `openrouter/deepseek/deepseek-v4-flash-0731` | `github_copilot/claude-opus-4.8` |
-| `claude-haiku-4-5-20251001` | `openrouter/deepseek/deepseek-v4-flash-0731` | `github_copilot/claude-opus-4.8` (Copilot has no Haiku) |
+| `claude-sonnet-4-6` | `openrouter/deepseek/deepseek-v4-flash-0731` | `github_copilot/claude-opus-4.6` |
+| `claude-haiku-4-5-20251001` | `openrouter/deepseek/deepseek-v4-flash-0731` | `github_copilot/claude-opus-4.6` (Copilot has no Haiku) |
 | `claude-opus-4-6` | `openrouter/deepseek/deepseek-v4-flash-0731` | `github_copilot/claude-opus-4.6` |
-| `claude-opus-4-7` | `openrouter/deepseek/deepseek-v4-flash-0731` | `github_copilot/claude-opus-4.7` |
-| `*` (wildcard) | `openrouter/deepseek/deepseek-v4-flash-0731` (concrete) | `github_copilot/*` — catch-all pass-through |
+| `claude-opus-4-7` | `openrouter/deepseek/deepseek-v4-flash-0731` | `github_copilot/claude-opus-4.6` |
+
+No wildcard: `openrouter/*` is not a concrete model (HTTP 400 `no_db_connection`) and `github_copilot/*` silently passes unknown models through. Every alias has an explicit concrete fallback above; unknown models fail loudly by design.
 
 Primary entries carry an `api_key` referencing the OpenRouter key from the environment; fallback entries carry the four editor headers Copilot validates.
 
@@ -89,7 +90,7 @@ Three workflows under `.github/workflows/`:
 
 **Proxy-canary detail.** Retries up to 5 times with 6 s sleep between attempts. Distinguishes hard errors (401/403/400/5xx/unreachable) from the upstream empty-content quirk. On persistent empty content the job sets `status=degraded` and emits a GitHub Actions warning — the proxy is verified as up and authenticating, so it does not page.
 
-**Model-health detail.** Parses `litellm_config.yaml` with PyYAML to extract all non-wildcard aliases. Each alias is probed with 5 retries (4 s apart). Failing aliases are collected and reported in a `model-health` labeled issue. Guards against false greens: if YAML parsing yields zero aliases, the job fails immediately.
+**Model-health detail.** Parses `litellm_config.yaml` with PyYAML to extract all non-wildcard aliases (the wildcard was removed: `openrouter/*` returns HTTP 400 and `github_copilot/*` silently passes unknown models through). Each alias is probed with 5 retries (4 s apart). Failing aliases are collected and reported in a `model-health` labeled issue. Guards against false greens: if YAML parsing yields zero aliases, the job fails immediately.
 
 ## 5. Version endpoint — `/health/version`
 

@@ -133,7 +133,7 @@ Set `ANTHROPIC_BASE_URL` to your proxy endpoint (`http://localhost:4000` for loc
 
 ## Model selection
 
-`litellm_config.yaml` defines explicit aliases for the common Claude Code model names (e.g. `claude-sonnet-4-6`, `claude-opus-4-7`) plus a `model_name: "*"` wildcard. Each alias has a **primary** (GitHub Copilot) and a **fallback** (OpenRouter) deployment, wired via `router_settings.fallbacks`. Claude Code's default model selection works without changes.
+`litellm_config.yaml` defines explicit aliases for the common Claude Code model names (e.g. `claude-sonnet-4-6`, `claude-opus-4-7`). Each alias has a **primary** (OpenRouter) and a **fallback** (GitHub Copilot) deployment, wired via `router_settings.fallbacks`. Claude Code's default model selection works without changes.
 
 To specify a model explicitly:
 
@@ -281,27 +281,27 @@ export CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1
 
 Copilot's limits are designed for interactive use. Autonomous loops consume quota significantly faster — expect to exhaust limits mid-month on standard plans with heavy use.
 
-**Mitigation:** the proxy routes to **OpenRouter as an automatic fallback** when Copilot fails or rate-limits. Configure the fallback in `litellm_config.yaml`:
+**Mitigation:** the proxy routes to **OpenRouter as the default upstream**, with GitHub Copilot as the automatic fallback when OpenRouter fails or rate-limits. Configure the fallback in `litellm_config.yaml`:
 
 ```yaml
 model_list:
-  # Primary — GitHub Copilot
-  - model_name: "*"
+  # Primary — OpenRouter
+  - model_name: "claude-sonnet-4-6"
     litellm_params:
-      model: "github_copilot/*"
+      model: "openrouter/deepseek/deepseek-v4-flash-0731"
+      api_key: "os.environ/OPENROUTER_API_KEY"
+  # Fallback — GitHub Copilot
+  - model_name: "claude-sonnet-4-6-fallback"
+    litellm_params:
+      model: "github_copilot/claude-opus-4.6"
       extra_headers:
         Editor-Version: "vscode/1.106.3"
         Editor-Plugin-Version: "copilot/1.388.0"
         Copilot-Integration-Id: "vscode-chat"
         User-Agent: "GithubCopilot/1.388.0"
-  # Fallback — OpenRouter
-  - model_name: "*-fallback"
-    litellm_params:
-      model: "openrouter/*"
-      api_key: "os.environ/OPENROUTER_API_KEY"
 ```
 
-**Note:** Multiple `model_list` entries alone do not enable automatic fallback. LiteLLM requires explicit [`fallbacks:` router configuration](https://docs.litellm.ai/docs/routing#fallbacks) to retry on a different deployment when Copilot rate limits are hit.
+**Note:** Multiple `model_list` entries alone do not enable automatic fallback. LiteLLM requires explicit [`fallbacks:` router configuration](https://docs.litellm.ai/docs/routing#fallbacks) to retry on a different deployment when the primary upstream fails or rate-limits.
 
 ---
 
@@ -427,13 +427,15 @@ litellm_settings:
 
 ## How it works
 
-`litellm_config.yaml` defines explicit model aliases plus a `model_name: "*"`
-wildcard. Each alias has a **primary** deployment that forwards to GitHub Copilot
-(with the editor headers the Copilot API expects) and a **fallback** deployment
-that forwards to OpenRouter (authenticated with `OPENROUTER_API_KEY`).
-`router_settings.fallbacks` wires them so the proxy retries on OpenRouter when
-Copilot fails or rate-limits. LiteLLM translates between Anthropic's
-`/v1/messages` format and each provider's API.
+`litellm_config.yaml` defines explicit model aliases, each with a **primary**
+deployment that forwards to OpenRouter (authenticated with `OPENROUTER_API_KEY`)
+and a **fallback** deployment that forwards to GitHub Copilot (with the editor
+headers the Copilot API expects). `router_settings.fallbacks` wires them so the
+proxy retries on Copilot when OpenRouter fails or rate-limits. No wildcard is
+defined: `openrouter/*` is not a concrete model and `github_copilot/*` would
+silently pass unknown models through, so unknown models fail loudly instead.
+LiteLLM translates between Anthropic's `/v1/messages` format and each provider's
+API.
 
 ---
 
