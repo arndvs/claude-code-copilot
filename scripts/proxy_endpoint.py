@@ -63,7 +63,9 @@ def resolve_proxy_endpoint(
     """Resolve the effective proxy endpoint for the current environment.
 
     ``settings`` is an optional parsed Claude settings mapping (with an ``env``
-    dict) used to honor an already-configured ``ANTHROPIC_BASE_URL``. Returns a
+    dict) used to honor an already-configured ``ANTHROPIC_BASE_URL``. It is only
+    consulted when explicitly passed — claude_enable.py deliberately passes none
+    (it writes that key, so reading it back would be circular). Returns a
     ``ProxyEndpoint(url, port, kind)``.
     """
     # 1. PROXY_BASE_URL — full URL override (highest precedence).
@@ -72,13 +74,16 @@ def resolve_proxy_endpoint(
         url = proxy_base.rstrip("/")
         return ProxyEndpoint(url=url, port=_port_from_url(url), kind=_classify(url))
 
-    # 2. ANTHROPIC_BASE_URL from settings — already-configured state.
-    env = settings.get("env") if isinstance(settings, dict) else None
-    if isinstance(env, dict):
-        anthropic = env.get("ANTHROPIC_BASE_URL")
-        if isinstance(anthropic, str) and anthropic.strip():
-            url = anthropic.strip().rstrip("/")
-            return ProxyEndpoint(url=url, port=_port_from_url(url), kind=_classify(url))
+    # 2. ANTHROPIC_BASE_URL from settings — only when a settings mapping is
+    #    explicitly passed (already-configured state). Never consulted for the
+    #    launch/enable path, which passes no settings.
+    if isinstance(settings, dict):
+        env = settings.get("env")
+        if isinstance(env, dict):
+            anthropic = env.get("ANTHROPIC_BASE_URL")
+            if isinstance(anthropic, str) and anthropic.strip():
+                url = anthropic.strip().rstrip("/")
+                return ProxyEndpoint(url=url, port=_port_from_url(url), kind=_classify(url))
 
     # 3. LITELLM_PORT from env or .env file.
     port = os.environ.get("LITELLM_PORT", "").strip() or _read_env_port(env_file)

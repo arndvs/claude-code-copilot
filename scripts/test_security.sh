@@ -333,6 +333,11 @@ FAKE_SETTINGS_FILE_2B="$FAKE_HOME3B/.claude/settings.json"
 HOSTED_PROXY_URL="https://proxy.example.test"
 mkdir -p "$(dirname "$FAKE_SETTINGS_FILE_2B")" "$FAKE_REPO/scripts"
 cp scripts/claude_enable.py scripts/proxy_status.py "$FAKE_REPO/scripts/"
+# claude_enable.py imports proxy_endpoint (canonical endpoint resolver, refs
+# #110) — copy it too so the harness exercises the same code the proxy runs.
+if [ -f scripts/proxy_endpoint.py ]; then
+    cp scripts/proxy_endpoint.py "$FAKE_REPO/scripts/"
+fi
 cat > "$FAKE_REPO/.env" <<EOF
 LITELLM_MASTER_KEY=$FAKE_KEY
 LITELLM_PORT=4999
