@@ -96,11 +96,46 @@ class _MockUpstream(BaseHTTPRequestHandler):
 
 @pytest.fixture(scope="module")
 def router_and_mock():
-    """Boot a LiteLLM Router against a mock upstream; yield (router, mock)."""
+    """Boot a LiteLLM Router against a mock upstream; yield (router, mock).
+
+    Hermetic by construction: the mock `api_base` override is not enough to keep
+    the `github_copilot/` provider off the network — LiteLLM's Copilot
+    authenticator reads a token from `GITHUB_COPILOT_TOKEN_DIR` and, when absent,
+    falls back to a device-code OAuth fetch (which CI's clean runner can't do →
+    `GetAccessTokenError`). We point that dir at a temp file with a dummy token
+    so Router init is hermetic everywhere (refs #113, #133, #146).
+    """
     litellm = pytest.importorskip("litellm")
     from litellm import Router
 
     cfg = _load_config()
+
+    # Hermetic Copilot token: point the authenticator at a temp dir with a
+    # dummy access-token JSON so it never hits the network (CI-safe). The
+    # authenticator reads a JSON file with {token, expires_at} (litellm 1.95).
+    import os
+    import tempfile
+
+    token_dir = tempfile.mkdtemp(prefix="copilot-token-")
+    api_key_name = os.environ.get(
+        "GITHUB_COPILOT_API_KEY_FILE", "api-key.json"
+    )
+    with open(os.path.join(token_dir, api_key_name), "w") as f:
+        import json
+
+        json.dump(
+            {
+                "token": "sk-copilot-test-token",
+                # Far future so the authenticator treats it as valid forever.
+                "expires_at": 4102444800,  # 2100-01-01
+            },
+            f,
+        )
+
+    # Save prior env so we restore it in teardown.
+    prior_dir = os.environ.get("GITHUB_COPILOT_TOKEN_DIR")
+    prior_key_file = os.environ.get("GITHUB_COPILOT_API_KEY_FILE")
+    os.environ["GITHUB_COPILOT_TOKEN_DIR"] = token_dir
 
     # Start the mock upstream on an ephemeral port.
     _MockUpstream.recorded = []
@@ -124,10 +159,20 @@ def router_and_mock():
         num_retries=router_settings.get("num_retries", 3),
     )
 
-    yield router, _MockUpstream
-
-    server.shutdown()
-    thread.join(timeout=5)
+    try:
+        yield router, _MockUpstream
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        # Restore prior env so other tests are unaffected.
+        if prior_dir is not None:
+            os.environ["GITHUB_COPILOT_TOKEN_DIR"] = prior_dir
+        else:
+            os.environ.pop("GITHUB_COPILOT_TOKEN_DIR", None)
+        if prior_key_file is not None:
+            os.environ["GITHUB_COPILOT_API_KEY_FILE"] = prior_key_file
+        else:
+            os.environ.pop("GITHUB_COPILOT_API_KEY_FILE", None)
 
 
 def _primary_aliases(config: dict) -> list[str]:
