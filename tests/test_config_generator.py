@@ -122,9 +122,9 @@ class TestAddingModelIsOneLine:
             assert "primary" in targets and "fallback" in targets, (
                 f"alias {alias!r} must define both 'primary' and 'fallback'"
             )
-            assert targets["primary"].startswith("github_copilot/"), (
-                f"alias {alias!r} primary must use the github_copilot/ prefix"
+            assert targets["primary"].startswith("openrouter/"), (
+                f"alias {alias!r} primary must use the openrouter/ prefix"
             )
-            assert targets["fallback"].startswith("openrouter/"), (
-                f"alias {alias!r} fallback must use the openrouter/ prefix"
+            assert targets["fallback"].startswith("github_copilot/"), (
+                f"alias {alias!r} fallback must use the github_copilot/ prefix"
             )

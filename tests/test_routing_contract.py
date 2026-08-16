@@ -3,9 +3,10 @@
 Boots a LiteLLM Router in-process against a mock upstream that records received
 requests, and verifies the routing contract for the dual-provider structure:
 
-- Each **primary** alias remaps to the correct Copilot model and carries all
-  four editor headers.
-- Each **fallback** alias remaps to the OpenRouter model and carries an api_key.
+- Each **primary** alias remaps to the correct OpenRouter model and carries an
+  api_key.
+- Each **fallback** alias remaps to the Copilot model and carries all four
+  editor headers.
 - ``router_settings.fallbacks`` wires each primary to its fallback.
 - ``stream: true`` is set on the upstream request.
 - ``thinking`` is stripped (``drop_params`` + ``additional_drop_params``).
@@ -59,7 +60,13 @@ def _load_config() -> dict:
 
 
 class _MockUpstream(BaseHTTPRequestHandler):
-    """Records each POST and returns a minimal Anthropic-style completion."""
+    """Records each POST and returns a provider-appropriate completion.
+
+    The dual-provider config routes primaries to OpenRouter (OpenAI-style
+    ``choices`` responses) and fallbacks to Copilot (Anthropic-style ``content``
+    responses). The mock inspects the request path to return the matching
+    format so the router treats the response as valid and does not fall back.
+    """
 
     recorded: list[dict] = []
 
@@ -73,17 +80,37 @@ class _MockUpstream(BaseHTTPRequestHandler):
                 "body": json.loads(body) if body else None,
             }
         )
-        resp = json.dumps(
-            {
-                "id": "msg_mock",
-                "type": "message",
-                "role": "assistant",
-                "model": "mock",
-                "content": [{"type": "text", "text": "hi"}],
-                "stop_reason": "end_turn",
-                "usage": {"input_tokens": 1, "output_tokens": 1},
-            }
-        ).encode()
+        # OpenRouter uses the OpenAI chat-completions path; Copilot uses the
+        # Anthropic messages path. Return the matching response shape.
+        if "/chat/completions" in self.path:
+            resp = json.dumps(
+                {
+                    "id": "chatcmpl_mock",
+                    "object": "chat.completion",
+                    "created": 0,
+                    "model": "mock",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {"role": "assistant", "content": "hi"},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                }
+            ).encode()
+        else:
+            resp = json.dumps(
+                {
+                    "id": "msg_mock",
+                    "type": "message",
+                    "role": "assistant",
+                    "model": "mock",
+                    "content": [{"type": "text", "text": "hi"}],
+                    "stop_reason": "end_turn",
+                    "usage": {"input_tokens": 1, "output_tokens": 1},
+                }
+            ).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(resp)))
@@ -153,6 +180,10 @@ def router_and_mock():
         model_list.append({"model_name": entry["model_name"], "litellm_params": params})
 
     router_settings = cfg.get("router_settings", {})
+    litellm_settings = cfg.get("litellm_settings", {})
+    # Mirror the proxy's litellm_settings.drop_params so unsupported params
+    # (e.g. `thinking` on OpenRouter) are dropped exactly as the proxy does.
+    litellm.drop_params = litellm_settings.get("drop_params", True)
     router = Router(
         model_list=model_list,
         fallbacks=router_settings.get("fallbacks", []),
@@ -196,9 +227,9 @@ def _fallback_aliases(config: dict) -> list[str]:
 
 
 class TestPrimaryRouting:
-    """Each primary alias must remap to Copilot and carry the editor headers."""
+    """Each primary alias must remap to OpenRouter and carry an api_key."""
 
-    def test_primary_remaps_to_copilot_model(self, router_and_mock):
+    def test_primary_remaps_to_openrouter_model(self, router_and_mock):
         router, mock = router_and_mock
         config = _load_config()
         for alias in _primary_aliases(config):
@@ -207,6 +238,7 @@ class TestPrimaryRouting:
                 model=alias,
                 messages=[{"role": "user", "content": "hi"}],
                 thinking={"type": "enabled"},
+                stream=False,
             )
             assert mock.recorded, f"no upstream request recorded for {alias}"
             body = mock.recorded[0]["body"]
@@ -215,15 +247,15 @@ class TestPrimaryRouting:
                 for e in config["model_list"]
                 if e["model_name"] == alias
             )
-            # litellm strips the github_copilot/ provider prefix at runtime, so
-            # the upstream sees the bare Copilot model id. Assert the suffix.
+            # litellm strips the openrouter/ provider prefix at runtime, so
+            # the upstream sees the bare OpenRouter model id. Assert the suffix.
             expected_bare = expected.split("/", 1)[1]
             assert body["model"] == expected_bare, (
                 f"alias {alias!r} remapped to {body['model']!r}, expected "
                 f"{expected_bare!r} (from {expected!r})"
             )
 
-    def test_primary_carries_all_four_editor_headers(self, router_and_mock):
+    def test_primary_carries_api_key(self, router_and_mock):
         router, mock = router_and_mock
         config = _load_config()
         for alias in _primary_aliases(config):
@@ -232,10 +264,11 @@ class TestPrimaryRouting:
                 model=alias, messages=[{"role": "user", "content": "hi"}]
             )
             assert mock.recorded, f"no upstream request recorded for {alias}"
-            headers = mock.recorded[0]["headers"]
-            missing = EDITOR_HEADERS - set(headers.keys())
-            assert not missing, (
-                f"alias {alias!r} missing editor header(s): {sorted(missing)}"
+            entry = next(
+                e for e in config["model_list"] if e["model_name"] == alias
+            )
+            assert "api_key" in entry["litellm_params"], (
+                f"alias {alias!r} primary must carry an api_key (OpenRouter)"
             )
 
     def test_primary_sets_stream_true(self, router_and_mock):
@@ -269,15 +302,17 @@ class TestPrimaryRouting:
 
 
 class TestFallbackRouting:
-    """Each fallback alias must remap to OpenRouter and carry an api_key."""
+    """Each fallback alias must remap to Copilot and carry the editor headers."""
 
-    def test_fallback_remaps_to_openrouter(self, router_and_mock):
+    def test_fallback_remaps_to_copilot_model(self, router_and_mock):
         router, mock = router_and_mock
         config = _load_config()
         for alias in _fallback_aliases(config):
             mock.recorded.clear()
             router.completion(
-                model=alias, messages=[{"role": "user", "content": "hi"}]
+                model=alias,
+                messages=[{"role": "user", "content": "hi"}],
+                stream=False,
             )
             assert mock.recorded, f"no upstream request recorded for {alias}"
             body = mock.recorded[0]["body"]
@@ -286,12 +321,27 @@ class TestFallbackRouting:
                 for e in config["model_list"]
                 if e["model_name"] == alias
             )
-            # litellm strips the openrouter/ provider prefix at runtime, so the
-            # upstream sees the bare OpenRouter model id. Assert the suffix.
+            # litellm strips the github_copilot/ provider prefix at runtime, so
+            # the upstream sees the bare Copilot model id. Assert the suffix.
             expected_bare = expected.split("/", 1)[1]
             assert body["model"] == expected_bare, (
                 f"fallback {alias!r} remapped to {body['model']!r}, expected "
                 f"{expected_bare!r} (from {expected!r})"
+            )
+
+    def test_fallback_carries_all_four_editor_headers(self, router_and_mock):
+        router, mock = router_and_mock
+        config = _load_config()
+        for alias in _fallback_aliases(config):
+            mock.recorded.clear()
+            router.completion(
+                model=alias, messages=[{"role": "user", "content": "hi"}]
+            )
+            assert mock.recorded, f"no upstream request recorded for {alias}"
+            headers = mock.recorded[0]["headers"]
+            missing = EDITOR_HEADERS - set(headers.keys())
+            assert not missing, (
+                f"fallback {alias!r} missing editor header(s): {sorted(missing)}"
             )
 
 

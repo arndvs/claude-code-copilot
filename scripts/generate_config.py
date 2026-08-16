@@ -27,8 +27,8 @@ from pathlib import Path
 import yaml
 
 # ── Single-source shared properties ──────────────────────────────────────────
-# The four editor headers Copilot validates. Defined once; every primary route
-# inherits them. Bumping a header version is a one-line edit here.
+# The four editor headers Copilot validates. Defined once; every Copilot
+# fallback route inherits them. Bumping a header version is a one-line edit here.
 EDITOR_HEADERS = {
     "Editor-Version": "vscode/1.106.3",
     "Editor-Plugin-Version": "copilot/1.388.0",
@@ -40,59 +40,60 @@ EDITOR_HEADERS = {
 COPILOT_PREFIX = "github_copilot/"
 OPENROUTER_PREFIX = "openrouter/"
 
-# Fallback entries carry the OpenRouter key from the environment.
+# Primary entries carry the OpenRouter key from the environment.
 OPENROUTER_API_KEY_REF = "os.environ/OPENROUTER_API_KEY"
 
 # Fallback model_names are the primary name + this suffix.
 FALLBACK_SUFFIX = "-fallback"
 
 # ── Model mapping (the only thing that varies per route) ─────────────────────
-# alias → {primary: github_copilot/<model>, fallback: openrouter/<model>}
+# alias → {primary: openrouter/<model>, fallback: github_copilot/<model>}
+# OpenRouter is the default upstream: it serves real completions reliably,
+# while Copilot's Claude models return empty-200 ('no choices') responses that
+# LiteLLM treats as success (no fallback). Copilot remains the automatic
+# fallback lane per alias. All Copilot fallbacks route to opus-4.6 — the one
+# consistently-working Copilot model (opus-4.8/4.7 return empty completions).
 # Adding a model is a one-line edit here; regenerate and commit.
 MODEL_MAPPING = {
     "claude-sonnet-4-6": {
-        "primary": f"{COPILOT_PREFIX}claude-opus-4.8",
-        "fallback": f"{OPENROUTER_PREFIX}deepseek/deepseek-v4-flash-0731",
+        "primary": f"{OPENROUTER_PREFIX}deepseek/deepseek-v4-flash-0731",
+        "fallback": f"{COPILOT_PREFIX}claude-opus-4.6",
     },
     "claude-haiku-4-5-20251001": {
-        "primary": f"{COPILOT_PREFIX}claude-opus-4.8",  # Copilot has no Haiku
-        "fallback": f"{OPENROUTER_PREFIX}deepseek/deepseek-v4-flash-0731",
+        "primary": f"{OPENROUTER_PREFIX}deepseek/deepseek-v4-flash-0731",
+        "fallback": f"{COPILOT_PREFIX}claude-opus-4.6",  # Copilot has no Haiku
     },
     "claude-opus-4-6": {
-        "primary": f"{COPILOT_PREFIX}claude-opus-4.6",
-        "fallback": f"{OPENROUTER_PREFIX}deepseek/deepseek-v4-flash-0731",
+        "primary": f"{OPENROUTER_PREFIX}deepseek/deepseek-v4-flash-0731",
+        "fallback": f"{COPILOT_PREFIX}claude-opus-4.6",
     },
     "claude-opus-4-7": {
-        "primary": f"{COPILOT_PREFIX}claude-opus-4.7",
-        "fallback": f"{OPENROUTER_PREFIX}deepseek/deepseek-v4-flash-0731",
-    },
-    "*": {
-        "primary": f"{COPILOT_PREFIX}*",
-        "fallback": f"{OPENROUTER_PREFIX}*",
+        "primary": f"{OPENROUTER_PREFIX}deepseek/deepseek-v4-flash-0731",
+        "fallback": f"{COPILOT_PREFIX}claude-opus-4.6",
     },
 }
 
 
 def _primary_entry(alias: str, primary: str) -> dict:
-    """Build a primary (Copilot) model_list entry with the shared headers."""
+    """Build a primary (OpenRouter) model_list entry with the API key."""
     return {
         "model_name": alias,
         "litellm_params": {
             "model": primary,
+            "api_key": OPENROUTER_API_KEY_REF,
             "stream": True,
-            "extra_headers": dict(EDITOR_HEADERS),
         },
     }
 
 
 def _fallback_entry(alias: str, fallback: str) -> dict:
-    """Build a fallback (OpenRouter) model_list entry with the API key."""
+    """Build a fallback (Copilot) model_list entry with the editor headers."""
     return {
         "model_name": f"{alias}{FALLBACK_SUFFIX}",
         "litellm_params": {
             "model": fallback,
-            "api_key": OPENROUTER_API_KEY_REF,
             "stream": True,
+            "extra_headers": dict(EDITOR_HEADERS),
         },
     }
 

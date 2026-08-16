@@ -38,7 +38,7 @@ launch_proxy() {
     return 1
   fi
 
-  echo "Starting LiteLLM proxy (GitHub Copilot primary, OpenRouter fallback) on port ${port}..."
+  echo "Starting LiteLLM proxy (OpenRouter primary, GitHub Copilot fallback) on port ${port}..."
   echo ""
 
   UV_NATIVE_TLS="${UV_NATIVE_TLS:-true}" \
