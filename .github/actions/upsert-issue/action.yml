@@ -1,0 +1,68 @@
+name: Upsert issue by label
+description: >-
+  Open a GitHub issue if none exists with the given label, otherwise comment on
+  the existing open issue. Encapsulates the "open or update issue by label"
+  pattern shared by the proxy-canary and model-health alerting workflows so the
+  shell block appears exactly once in the repo (refs #118, #132).
+
+inputs:
+  label:
+    description: Label that identifies the issue (also used to find an existing open one).
+    required: true
+  label-color:
+    description: Hex color for the label when it must be created (e.g. B60205).
+    required: true
+  label-description:
+    description: Description for the label when it must be created.
+    required: true
+  title:
+    description: Title for the issue when it must be created.
+    required: true
+  body:
+    description: Body for the issue (or the comment on an existing one).
+    required: true
+  token:
+    description: GitHub token with issues:write + labels:write scope.
+    required: true
+
+outputs:
+  issue-number:
+    description: Number of the issue that was created or commented on.
+    value: ${{ steps.upsert.outputs.issue_number }}
+  action-taken:
+    description: Whether the issue was 'created' or 'commented'.
+    value: ${{ steps.upsert.outputs.action_taken }}
+
+runs:
+  using: composite
+  steps:
+    - name: Open or update the issue by label
+      id: upsert
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        LABEL: ${{ inputs.label }}
+        LABEL_COLOR: ${{ inputs.label-color }}
+        LABEL_DESCRIPTION: ${{ inputs.label-description }}
+        TITLE: ${{ inputs.title }}
+        BODY: ${{ inputs.body }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Substitute the runtime timestamp placeholder (workflow templates cannot
+        # compute "now" at run time, so the action does it to keep body format
+        # identical to the pre-refactor inline blocks).
+        body=${BODY//__TIMESTAMP__/$(date -u +%FT%TZ)}
+        existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label "$LABEL" \
+          --json number --jq '.[0].number // empty' 2>/dev/null || true)
+        if [ -n "$existing" ]; then
+          gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
+          echo "issue_number=$existing" >> "$GITHUB_OUTPUT"
+          echo "action_taken=commented" >> "$GITHUB_OUTPUT"
+        else
+          gh label create "$LABEL" --repo "$GITHUB_REPOSITORY" --color "$LABEL_COLOR" \
+            --description "$LABEL_DESCRIPTION" 2>/dev/null || true
+          created=$(gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" \
+            --label "$LABEL" --body "$body" --json number --jq '.number')
+          echo "issue_number=$created" >> "$GITHUB_OUTPUT"
+          echo "action_taken=created" >> "$GITHUB_OUTPUT"
+        fi

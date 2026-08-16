@@ -12,12 +12,12 @@ if [[ -f "$SCRIPT_DIR/.env" ]]; then
   set +a
 fi
 
-PORT="${LITELLM_PORT:-4000}"
+# Shared proxy-launch function (refs #115, #127) — single source of truth for
+# the canonical `uv run` command, version pin, and env requirements.
+# shellcheck disable=SC1091  # sourced from the repo, not available at lint time
+source "$SCRIPT_DIR/scripts/_launch_proxy.sh"
 
-if [[ -z "${LITELLM_MASTER_KEY:-}" ]]; then
-  echo "❌ LITELLM_MASTER_KEY not set. Run 'make setup' or create .env first."
-  exit 1
-fi
+PORT="${LITELLM_PORT:-4000}"
 
 echo "Starting LiteLLM proxy (OpenRouter primary, GitHub Copilot fallback) on port ${PORT}..."
 echo ""
@@ -32,17 +32,5 @@ echo "  ANTHROPIC_AUTH_TOKEN=<set to your LITELLM_MASTER_KEY>"
 echo "  CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1"
 echo ""
 
-# Single-source LiteLLM version from .litellm-version (refs #126) so a bump
-# updates Docker, Makefile, and this script together.
-LITELLM_VERSION="$(cat "$SCRIPT_DIR/.litellm-version" 2>/dev/null || echo '')"
-if [ -z "$LITELLM_VERSION" ]; then
-  echo "❌ Could not read LiteLLM version from $SCRIPT_DIR/.litellm-version" >&2
-  echo "   Create it (e.g. 'echo 1.89.1 > .litellm-version') before starting." >&2
-  exit 1
-fi
-
-UV_NATIVE_TLS="${UV_NATIVE_TLS:-true}" \
-  PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}" \
-  exec uv run \
-  --with "litellm[proxy]==${LITELLM_VERSION}" \
-  litellm --config "$SCRIPT_DIR/litellm_config.yaml" --port "${PORT}"
+# exec so the shell is replaced by the proxy process (correct for Docker/systemd).
+exec launch_proxy "$PORT" "$SCRIPT_DIR/litellm_config.yaml"

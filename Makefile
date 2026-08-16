@@ -1,4 +1,4 @@
-.PHONY: help setup start stop test test-stream claude-enable claude-disable claude-status install-claude
+.PHONY: help setup start stop test test-stream generate-config claude-enable claude-disable claude-status install-claude
 
 PORT ?= 4000
 
@@ -11,6 +11,7 @@ help:
 	@echo "  make stop                Stop the proxy"
 	@echo "  make test                Test proxy is working (non-streaming)"
 	@echo "  make test-stream         Test proxy streaming (SSE) response"
+	@echo "  make generate-config     Regenerate litellm_config.yaml from the model mapping"
 	@echo ""
 	@echo "  make claude-enable       Point Claude Code at local proxy"
 	@echo "  make claude-disable      Restore Claude Code to Anthropic direct"
@@ -55,20 +56,21 @@ start:
 	@if [ ! -f .env ]; then echo "❌ .env not found. Run 'make setup' first."; exit 1; fi
 	@set -a && . ./.env && set +a && \
 	PORT=$${LITELLM_PORT:-$(PORT)} && \
-	LITELLM_VERSION=$$(cat .litellm-version 2>/dev/null || echo '') && \
-	if [ -z "$$LITELLM_VERSION" ]; then echo "❌ Could not read LiteLLM version from .litellm-version. Create it (e.g. 'echo 1.89.1 > .litellm-version') before starting."; exit 1; fi && \
-	echo "Starting LiteLLM proxy (OpenRouter primary, GitHub Copilot fallback) on port $$PORT..." && \
-	UV_NATIVE_TLS=$${UV_NATIVE_TLS:-true} \
-	PYTHONPATH=.$${PYTHONPATH:+:$$PYTHONPATH} \
-	uv run \
-		--with "litellm[proxy]==$$LITELLM_VERSION" \
-		litellm --config litellm_config.yaml --port $$PORT
-
+     echo "Starting LiteLLM proxy (OpenRouter primary, GitHub Copilot fallback) on port $$PORT..." && \
+     source scripts/_launch_proxy.sh && \
+     launch_proxy "$$PORT" "litellm_config.yaml"
 stop:
 	@if [ ! -f .env ]; then echo "❌ .env not found. Run 'make setup' first."; exit 1; fi
 	@set -a && . ./.env && set +a && \
 	PORT=$${LITELLM_PORT:-$(PORT)} && \
 	pkill -f "litellm --config .*litellm_config.yaml --port $$PORT" 2>/dev/null && echo "✅ Proxy stopped" || echo "ℹ️  No proxy process found"
+
+# ── Config generation ──────────────────────────────────────────
+
+generate-config:
+	@python3 scripts/generate_config.py -o litellm_config.yaml && \
+	git diff --exit-code litellm_config.yaml && echo "✅ litellm_config.yaml is up to date with generate_config.py" || \
+	{ echo "❌ litellm_config.yaml was regenerated (drift fixed). Review and commit the change."; exit 1; }
 
 # ── Test ───────────────────────────────────────────────────────
 

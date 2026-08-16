@@ -20,7 +20,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install Python dependencies
-        run: pip install pyyaml pytest fastapi httpx
+        run: pip install pyyaml pytest fastapi httpx "litellm[proxy]"
 
       # Convention: every shell script matching scripts/test_*.sh, tests/test_*.sh, or the
       # vendored .sandcastle/scripts/test_*.sh is auto-discovered and run here — add a new

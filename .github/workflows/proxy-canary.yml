@@ -83,28 +83,21 @@ jobs:
 
       - name: Open or update the canary issue on failure
         if: steps.probe.outputs.status == 'fail'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          DETAIL: ${{ steps.probe.outputs.detail }}
-        run: |
-          title="🚨 Proxy canary failing"
-          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label proxy-canary \
-            --json number --jq '.[0].number // empty' 2>/dev/null || true)
-          body=$(printf '%s\n' \
-            "The proxy canary failed at $(date -u +%FT%TZ)." \
-            "" \
-            "**Detail:** ${DETAIL}" \
-            "" \
-            "Probes \`/health/readiness\` then a real \`/v1/messages\` completion. No secret values are logged." \
-            "" \
-            "Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}")
-          if [ -n "$existing" ]; then
-            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
-          else
-            gh label create proxy-canary --repo "$GITHUB_REPOSITORY" --color B60205 \
-              --description "Proxy health" 2>/dev/null || true
-            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --label proxy-canary --body "$body"
-          fi
+        uses: ./.github/actions/upsert-issue
+        with:
+          token: ${{ github.token }}
+          label: proxy-canary
+          label-color: B60205
+          label-description: Proxy health
+          title: "🚨 Proxy canary failing"
+          body: |
+            The proxy canary failed at __TIMESTAMP__.
+
+            **Detail:** ${{ steps.probe.outputs.detail }}
+
+            Probes `/health/readiness` then a real `/v1/messages` completion. No secret values are logged.
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
       - name: Mark the job failed
         if: steps.probe.outputs.status == 'fail'
