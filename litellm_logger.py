@@ -171,6 +171,58 @@ def _extract_http_info(kwargs):
     return result
 
 
+_FALLBACK_SUFFIX = "-fallback"
+
+
+def _extract_routing(kwargs, response_obj):
+    """Return (routed_model, is_fallback) defensively.
+
+    ``routed_model`` is the ACTUAL upstream model that served the completion —
+    LiteLLM's ``response_obj._hidden_params["litellm_model_name"]`` (e.g.
+    ``github_copilot/claude-opus-4.6``) as opposed to the requested alias
+    (``claude-sonnet-4-6``). When it is unavailable, falls back to
+    ``kwargs["model"]``.
+
+    ``is_fallback`` is True when the served deployment is a fallback lane —
+    detected via LiteLLM's ``x-litellm-model-group`` header (which carries the
+    served model group, e.g. ``claude-sonnet-4-6-fallback``) or, failing that,
+    whether the routed model string is concretely addressed (never guessed from
+    the alias; degraded to None when unknown — NOT False — so "not logged" is
+    distinguishable from "definitely primary").
+
+    Metadata only, defensive: any extraction failure degrades to
+    ``(None, None)`` rather than raising.
+    """
+    routed_model = None
+    is_fallback = None
+    try:
+        hidden = getattr(response_obj, "_hidden_params", None)
+        if not isinstance(hidden, dict) and isinstance(response_obj, dict):
+            hidden = response_obj.get("_hidden_params")
+
+        if isinstance(hidden, dict):
+            # The full provider-prefixed model id that actually served.
+            lm_name = hidden.get("litellm_model_name")
+            if isinstance(lm_name, str) and lm_name:
+                routed_model = lm_name
+
+            # The served model group (e.g. claude-sonnet-4-6-fallback).
+            headers = hidden.get("additional_headers")
+            if isinstance(headers, dict):
+                group = headers.get("x-litellm-model-group")
+                if isinstance(group, str) and group:
+                    is_fallback = group.endswith(_FALLBACK_SUFFIX)
+
+        # Fall back to kwargs["model"] when _hidden_params is unavailable.
+        if not isinstance(routed_model, str):
+            model = kwargs.get("model") if isinstance(kwargs, dict) else None
+            if isinstance(model, str) and model:
+                routed_model = model
+    except Exception:
+        pass
+    return routed_model, is_fallback
+
+
 def _emit(kwargs, response_obj, start_time, end_time, status):
     try:
         rec = {"t": "proxy_log", "status": status}
@@ -197,9 +249,45 @@ def _emit(kwargs, response_obj, start_time, end_time, status):
         if "ratelimit" in http_info:
             rec["ratelimit"] = http_info["ratelimit"]
 
+        # Routing observability (refs #157): the ACTUAL model that served
+        # (routed_model) and whether that deployment is a fallback lane
+        # (is_fallback). Both degrade to null when unavailable.
+        routed_model, is_fallback = _extract_routing(kwargs, response_obj)
+        rec["routed_model"] = routed_model
+        rec["is_fallback"] = is_fallback
+
         print("PROXY_LOG " + json.dumps(rec, default=str), file=sys.stdout, flush=True)
     except Exception:
         # Observability must never break request handling.
+        pass
+
+
+def _emit_fallback_event(kind, original_model_group, original_exception):
+    """Emit a dedicated PROXY_LOG marker for a routing fallback event.
+
+    LiteLLM fires ``log_success_fallback_event`` / ``log_failure_fallback_event``
+    when ``router_settings.fallbacks`` triggers a failover after the primary
+    failed. The marker is a self-contained record: the original (primary) model
+    group that failed, whether the fallback succeeded, and the error reason —
+    so fallback-served traffic is greppable without depending on the
+    success-event response shape.
+
+    Metadata only and defensive — a logging failure must never break routing.
+    """
+    try:
+        rec = {
+            "t": "proxy_log",
+            "event": "fallback_event",
+            "fallback_status": kind,
+            "original_model": original_model_group,
+        }
+        if original_exception is not None:
+            try:
+                rec["error"] = str(original_exception)[:500]
+            except Exception:
+                pass
+        print("PROXY_LOG " + json.dumps(rec, default=str), file=sys.stdout, flush=True)
+    except Exception:
         pass
 
 
@@ -215,6 +303,16 @@ class ProxyObservabilityLogger(CustomLogger):
         # is handled by log_success_event after all chunks are received.
         # Logging per-chunk would be very noisy and log incomplete content_len.
         pass
+
+    # ── Fallback routing observability (refs #157) ──────────────────────────
+    # LiteLLM fires these (sync only, 1.95) when router_settings.fallbacks
+    # routes a request to a fallback deployment after the primary failed.
+
+    def log_success_fallback_event(self, original_model_group, kwargs, original_exception, **extra_kwargs):
+        _emit_fallback_event("success", original_model_group, original_exception)
+
+    def log_failure_fallback_event(self, original_model_group, kwargs, original_exception, **extra_kwargs):
+        _emit_fallback_event("failure", original_model_group, original_exception)
 
     async def async_log_success_event(self, kwargs, response_obj, start_time, end_time, **extra_kwargs):
         _emit(kwargs, response_obj, start_time, end_time, "success")

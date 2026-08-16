@@ -22,7 +22,15 @@ from io import StringIO
 from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from litellm_logger import _duration_ms, _extract, _extract_http_info, _emit, ProxyObservabilityLogger
+from litellm_logger import (
+    _duration_ms,
+    _extract,
+    _extract_http_info,
+    _extract_routing,
+    _emit,
+    _emit_fallback_event,
+    ProxyObservabilityLogger,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -887,6 +895,207 @@ class TestProxyObservabilityLogger(unittest.TestCase):
         self.assertTrue(line.startswith("PROXY_LOG "), f"Expected PROXY_LOG prefix, got: {line!r}")
         rec = json.loads(line[len("PROXY_LOG "):])
         self.assertEqual(rec["status"], "failure")
+
+
+# ===================================================================
+# _extract_routing — routed_model / is_fallback (refs #157)
+# ===================================================================
+
+
+class TestExtractRouting(unittest.TestCase):
+    """Test _extract_routing defensive extraction of routed model + fallback flag."""
+
+    def _hidden_response(self, additional_headers=None, litellm_model_name=None):
+        """Build a SimpleNamespace response with _hidden_params."""
+        hidden = {}
+        if litellm_model_name:
+            hidden["litellm_model_name"] = litellm_model_name
+        if additional_headers is not None:
+            hidden["additional_headers"] = additional_headers
+        obj = SimpleNamespace(_hidden_params=hidden)
+        return obj
+
+    def test_primary_path_detects_no_fallback(self):
+        """A primary deployment (model group without -fallback) → is_fallback False."""
+        response_obj = self._hidden_response(
+            litellm_model_name="openrouter/deepseek/deepseek-v4-flash-0731",
+            additional_headers={"x-litellm-model-group": "claude-sonnet-4-6"},
+        )
+        routed_model, is_fallback = _extract_routing({}, response_obj)
+        self.assertEqual(routed_model, "openrouter/deepseek/deepseek-v4-flash-0731")
+        self.assertIs(is_fallback, False)
+
+    def test_fallback_path_detects_fallback(self):
+        """A deployment with '-fallback' model group → is_fallback=True."""
+        response_obj = self._hidden_response(
+            litellm_model_name="github_copilot/claude-opus-4.6",
+            additional_headers={"x-litellm-model-group": "claude-sonnet-4-6-fallback"},
+        )
+        routed_model, is_fallback = _extract_routing({}, response_obj)
+        self.assertEqual(routed_model, "github_copilot/claude-opus-4.6")
+        self.assertIs(is_fallback, True)
+
+    def test_missing_hidden_params_falls_back_to_kwargs_model(self):
+        """Without _hidden_params, routed_model falls back to kwargs['model']."""
+        kwargs = {"model": "claude-sonnet-4-6"}
+        routed_model, is_fallback = _extract_routing(kwargs, SimpleNamespace(_hidden_params={}))
+        self.assertEqual(routed_model, "claude-sonnet-4-6")
+        # is_fallback stays None when we can't determine it (not False) — so
+        # "unknown" is distinguishable from "definitely primary".
+        self.assertIsNone(is_fallback)
+
+    def test_missing_everything_degrades_to_none(self):
+        routed_model, is_fallback = _extract_routing({}, None)
+        self.assertIsNone(routed_model)
+        self.assertIsNone(is_fallback)
+
+    def test_defensive_on_garbage_inputs(self):
+        routed_model, is_fallback = _extract_routing("not a dict", "not an object")
+        self.assertIsNone(routed_model)
+        self.assertIsNone(is_fallback)
+
+    def test_non_string_model_group_degrades(self):
+        response_obj = self._hidden_response(
+            litellm_model_name="openrouter/deepseek/deepseek-v4-flash-0731",
+            additional_headers={"x-litellm-model-group": 42},
+        )
+        routed_model, is_fallback = _extract_routing({}, response_obj)
+        self.assertEqual(routed_model, "openrouter/deepseek/deepseek-v4-flash-0731")
+        self.assertIsNone(is_fallback)
+
+
+class TestEmitRoutingFields(unittest.TestCase):
+    """_emit must include routed_model and is_fallback (null when unknown)."""
+
+    def test_emit_primary_has_routed_model_false_fallback(self):
+        kwargs = {"model": "claude-sonnet-4-6", "call_type": "completion"}
+        response_obj = SimpleNamespace(
+            _hidden_params={
+                "litellm_model_name": "openrouter/deepseek/deepseek-v4-flash-0731",
+                "additional_headers": {"x-litellm-model-group": "claude-sonnet-4-6"},
+            }
+        )
+        rec = _capture_emit(kwargs, response_obj=response_obj)
+        self.assertEqual(rec["routed_model"], "openrouter/deepseek/deepseek-v4-flash-0731")
+        self.assertIs(rec["is_fallback"], False)
+
+    def test_emit_fallback_has_routed_model_true_fallback(self):
+        kwargs = {"model": "claude-sonnet-4-6", "call_type": "completion"}
+        response_obj = SimpleNamespace(
+            _hidden_params={
+                "litellm_model_name": "github_copilot/claude-opus-4.6",
+                "additional_headers": {"x-litellm-model-group": "claude-sonnet-4-6-fallback"},
+            }
+        )
+        rec = _capture_emit(kwargs, response_obj=response_obj)
+        self.assertEqual(rec["routed_model"], "github_copilot/claude-opus-4.6")
+        self.assertIs(rec["is_fallback"], True)
+
+    def test_emit_missing_hidden_params_falls_back_to_requested_model(self):
+        """When _hidden_params is absent, routed_model falls back to the
+        requested alias; is_fallback stays None (unknown, not False)."""
+        kwargs = {"model": "claude-sonnet-4-6", "call_type": "completion"}
+        rec = _capture_emit(kwargs, response_obj=SimpleNamespace(_hidden_params=None))
+        self.assertEqual(rec["routed_model"], "claude-sonnet-4-6")
+        self.assertIsNone(rec["is_fallback"])
+
+    def test_emit_routing_fields_never_leak_content(self):
+        kwargs = {"model": "claude-sonnet-4-6", "call_type": "completion"}
+        response_obj = SimpleNamespace(
+            _hidden_params={
+                "litellm_model_name": "github_copilot/claude-opus-4.6",
+                "additional_headers": {"x-litellm-model-group": "claude-sonnet-4-6-fallback"},
+            }
+        )
+        rec = _capture_emit(kwargs, response_obj=response_obj)
+        raw_line = json.dumps(rec)
+        self.assertNotIn("SECRET_CONTENT_SHOULD_NOT_APPEAR", raw_line)
+
+
+# ===================================================================
+# _emit_fallback_event — fallback routing markers (refs #157)
+# ===================================================================
+
+
+class TestEmitFallbackEvent(unittest.TestCase):
+    """_emit_fallback_event must emit self-contained fallback markers."""
+
+    def _capture_fallback_emit(self, kind, original_model_group, original_exception=None):
+        buf = StringIO()
+        old_stdout = sys.stdout
+        try:
+            sys.stdout = buf
+            _emit_fallback_event(kind, original_model_group, original_exception)
+        finally:
+            sys.stdout = old_stdout
+        line = buf.getvalue().strip()
+        self.assertTrue(line.startswith("PROXY_LOG "), f"Expected PROXY_LOG prefix, got: {line!r}")
+        return json.loads(line[len("PROXY_LOG "):])
+
+    def test_success_marker(self):
+        rec = self._capture_fallback_emit("success", "claude-sonnet-4-6")
+        self.assertEqual(rec["t"], "proxy_log")
+        self.assertEqual(rec["event"], "fallback_event")
+        self.assertEqual(rec["fallback_status"], "success")
+        self.assertEqual(rec["original_model"], "claude-sonnet-4-6")
+        self.assertNotIn("error", rec)
+
+    def test_failure_marker_includes_error(self):
+        rec = self._capture_fallback_emit("failure", "claude-opus-4-6", ValueError("upstream 500"))
+        self.assertEqual(rec["fallback_status"], "failure")
+        self.assertEqual(rec["original_model"], "claude-opus-4-6")
+        self.assertIn("error", rec)
+
+    def test_none_exception_no_error_key(self):
+        rec = self._capture_fallback_emit("success", "claude-sonnet-4-6", None)
+        self.assertNotIn("error", rec)
+
+    def test_defensive_on_garbage(self):
+        buf = StringIO()
+        old_stdout = sys.stdout
+        try:
+            sys.stdout = buf
+            _emit_fallback_event(None, None, Exception("boom"))  # must not raise
+        finally:
+            sys.stdout = old_stdout
+        line = buf.getvalue().strip()
+        self.assertTrue(line.startswith("PROXY_LOG "))
+
+
+class TestFallbackCallbacks(unittest.TestCase):
+    """The CustomLogger fallback hooks dispatch to _emit_fallback_event."""
+
+    def test_log_success_fallback_event_emits_marker(self):
+        logger = ProxyObservabilityLogger()
+        buf = StringIO()
+        old_stdout = sys.stdout
+        try:
+            sys.stdout = buf
+            logger.log_success_fallback_event("claude-sonnet-4-6", {}, None)
+        finally:
+            sys.stdout = old_stdout
+        line = buf.getvalue().strip()
+        self.assertTrue(line.startswith("PROXY_LOG "))
+        rec = json.loads(line[len("PROXY_LOG "):])
+        self.assertEqual(rec["event"], "fallback_event")
+        self.assertEqual(rec["fallback_status"], "success")
+        self.assertEqual(rec["original_model"], "claude-sonnet-4-6")
+
+    def test_log_failure_fallback_event_emits_marker(self):
+        logger = ProxyObservabilityLogger()
+        buf = StringIO()
+        old_stdout = sys.stdout
+        try:
+            sys.stdout = buf
+            logger.log_failure_fallback_event("claude-opus-4-6", {}, ValueError("boom"))
+        finally:
+            sys.stdout = old_stdout
+        line = buf.getvalue().strip()
+        self.assertTrue(line.startswith("PROXY_LOG "))
+        rec = json.loads(line[len("PROXY_LOG "):])
+        self.assertEqual(rec["event"], "fallback_event")
+        self.assertEqual(rec["fallback_status"], "failure")
+        self.assertEqual(rec["original_model"], "claude-opus-4-6")
 
 
 if __name__ == "__main__":

@@ -60,7 +60,9 @@ docker compose -f docker-compose.yml -f docker-compose.db.yml up --build
 
 | Field | Description |
 |---|---|
-| `model` | Requested model name |
+| `model` | Requested model name (the alias) |
+| `routed_model` | ACTUAL model that served the request (provider-prefixed, e.g. `openrouter/deepseek/deepseek-v4-flash-0731` or `github_copilot/claude-opus-4.6`); falls back to the requested alias when upstream metadata is unavailable |
+| `is_fallback` | `true` when the served deployment is a `*-fallback` lane; `false` when primary; `null` when it cannot be determined (e.g. no routing metadata) — so "unknown" is distinguishable from "definitely primary" |
 | `call_type` | LiteLLM call type |
 | `stream` | Whether the request used streaming (`true`, `false`, or `null` if unknown) |
 | `ms` | Latency in milliseconds |
@@ -71,6 +73,8 @@ docker compose -f docker-compose.yml -f docker-compose.db.yml up --build
 | `http_status` | HTTP status code from upstream (int or null) |
 | `ratelimit` | Dict of `x-ratelimit-*` headers (prefix-stripped); **omitted** when none present |
 | `status` | `success` or `failure` |
+
+**Fallback markers.** When `router_settings.fallbacks` triggers a failover after the primary fails, LiteLLM fires `log_success_fallback_event` / `log_failure_fallback_event`. The logger emits a dedicated `PROXY_LOG` record with `event=fallback_event`, `fallback_status` (`success`/`failure`), `original_model` (the primary alias that failed), and `error` (failure reason only). A `grep '"is_fallback":true'` on structured logs finds every fallback-served request; `grep '"event":"fallback_event"'` finds every failover event.
 
 **Design rules:**
 
