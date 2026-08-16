@@ -1,15 +1,15 @@
 # claude-code-copilot
 
-Route Claude Code through your GitHub Copilot subscription via a secure LiteLLM proxy (local or hosted), with OpenRouter as an automatic fallback. No separate Anthropic API key required for the primary path.
+Route Claude Code through a secure LiteLLM proxy (local or hosted) that serves real completions via OpenRouter as the primary upstream, with GitHub Copilot as an automatic fallback. No separate Anthropic API key required.
 
 ```
-Claude Code → LiteLLM proxy (local or hosted) → GitHub Copilot API (primary)
-                                                └→ OpenRouter API (fallback)
+Claude Code → LiteLLM proxy (local or hosted) → OpenRouter API (primary)
+                                                └→ GitHub Copilot API (fallback)
 ```
 
 ## Why this exists
 
-GitHub Copilot subscriptions include access to Claude, GPT-4o, and other models — but only through GitHub's API. Claude Code expects the Anthropic Messages API. This proxy bridges that gap: it accepts Anthropic-format requests and translates them to GitHub Copilot's API, letting you run Claude Code against your existing Copilot subscription without paying for a separate Anthropic API key. If Copilot is unavailable or rate-limited, the proxy automatically falls back to OpenRouter so your agents keep working.
+GitHub Copilot subscriptions include access to Claude, GPT-4o, and other models — but only through GitHub's API. Claude Code expects the Anthropic Messages API. This proxy bridges that gap: it accepts Anthropic-format requests and translates them to the upstream provider's API. OpenRouter is the primary upstream because it serves real completions reliably, while Copilot's Claude models have been returning empty-200 ('no choices') responses that LiteLLM treats as success. Copilot remains the automatic fallback lane so your agents keep working if OpenRouter is unavailable or rate-limited.
 
 This is the **infrastructure layer** for [ctrlshft](https://github.com/arndvs/ctrlshft) — a dotfiles-based operating system for autonomous AI coding agents. The `shft` CLI manages this proxy as a daemon, injecting `ANTHROPIC_BASE_URL` into every Claude session (interactive and autonomous) so all model requests route through the proxy.
 
@@ -21,11 +21,11 @@ This is the **infrastructure layer** for [ctrlshft](https://github.com/arndvs/ct
 │  └── afk.sh / once.sh → autonomous agent loops         │
 ├─────────────────────────────────────────────────────────┤
 │  claude-code-copilot (this repo — the proxy)            │
-│  ├── LiteLLM translates Anthropic API → Copilot API    │
-│  ├── OAuth token cached, model names mapped             │
-│  └── OpenRouter fallback when Copilot fails             │
+│  ├── LiteLLM translates Anthropic API → provider API    │
+│  ├── OpenRouter primary, Copilot OAuth fallback         │
+│  └── model names mapped per alias                       │
 ├─────────────────────────────────────────────────────────┤
-│  GitHub Copilot API (primary) / OpenRouter (fallback)   │
+│  OpenRouter API (primary) / GitHub Copilot (fallback)   │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -36,8 +36,8 @@ This is the **infrastructure layer** for [ctrlshft](https://github.com/arndvs/ct
 
 ## Prerequisites
 
-- [GitHub Copilot](https://github.com/features/copilot) subscription (primary)
-- An [OpenRouter](https://openrouter.ai) account and API key (fallback)
+- An [OpenRouter](https://openrouter.ai) account and API key (primary)
+- A [GitHub Copilot](https://github.com/features/copilot) subscription (fallback)
 - [uv](https://docs.astral.sh/uv/) — installed automatically by `make setup` if missing
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — `make install-claude` if needed
 
@@ -142,10 +142,11 @@ claude --model claude-sonnet-4-6
 claude --model claude-opus-4-7
 ```
 
-> **Note:** the primary path uses your GitHub Copilot subscription. The OpenRouter
-> fallback currently routes to `deepseek/deepseek-v4-flash-0731`. To change the
-> fallback model, edit the fallback entry's `model:` value in `litellm_config.yaml`
-> to any OpenRouter model ID your key can access (e.g. `anthropic/claude-sonnet-4-5`).
+> **Note:** the primary path uses OpenRouter, which currently routes to
+> `deepseek/deepseek-v4-flash-0731`. To change the primary model, edit the primary
+> entry's `model:` value in `litellm_config.yaml` to any OpenRouter model ID your
+> key can access (e.g. `anthropic/claude-sonnet-4-5`). Copilot is the automatic
+> fallback lane per alias.
 > See [docs/hosted_deployment.md](docs/hosted_deployment.md#model-selection-note).
 
 ---
