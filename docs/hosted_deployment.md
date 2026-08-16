@@ -9,14 +9,14 @@ For the general security model (localhost binding, bearer auth, no public proxy 
 ## Architecture
 
 ```
-Claude Code client → HTTPS :443 → Caddy (TLS) → 127.0.0.1:4000 → LiteLLM → GitHub Copilot (primary)
-                                                                        └→ OpenRouter (fallback)
+Claude Code client → HTTPS :443 → Caddy (TLS) → 127.0.0.1:4000 → LiteLLM → OpenRouter (primary)
+                                                                        └→ GitHub Copilot (fallback)
 
 ```
 
 - One small EC2 instance runs two containers: the LiteLLM proxy (bound to localhost only) and Caddy (terminates TLS, forwards to the proxy).
 - Auth is enforced by LiteLLM via `LITELLM_MASTER_KEY`. Caddy does **not** add auth — the proxy is the gatekeeper.
-- The proxy is **dual-provider**: GitHub Copilot is the primary upstream (OAuth token cached on the host and mounted read-write), and OpenRouter is the automatic fallback (`OPENROUTER_API_KEY` in `.env`).
+- The proxy is **dual-provider**: OpenRouter is the primary upstream (`OPENROUTER_API_KEY` in `.env`), and GitHub Copilot is the automatic fallback (OAuth token cached on the host and mounted read-write).
 
 ---
 

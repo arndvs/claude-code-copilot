@@ -5,7 +5,7 @@ import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
 import { runWithRetry } from "../lib/run-with-retry.js";
 import { WritePrOutput } from "../schemas/write-pr-output.js";
 import { loadConfig } from "../lib/config.js";
-import { resolvePrompt, configPromptArgs } from "../lib/resolve-prompt.js";
+import { resolvePrompt, configPromptArgs, filterPromptArgs } from "../lib/resolve-prompt.js";
 import { resolveDefaultTemplatesDir } from "../lib/default-template-paths.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -61,12 +61,12 @@ export async function runWritePr(opts: {
   const promptName = isPrd ? "write-prd-pr" : "write-pr";
   const promptFile = await resolvePrompt({ name: promptName, config, repoDir: opts.repoDir, templatesDir });
 
-  const promptArgs: Record<string, string> = {
+  const promptArgs: Record<string, string> = filterPromptArgs(promptFile, {
     ...configPromptArgs(config),
     ...(isPrd
       ? { PRD_NUMBER: opts.prdNumber!, PRD_TITLE: opts.prdTitle! }
       : { ISSUE_NUMBER: opts.issueNumber!, ISSUE_TITLE: opts.issueTitle!, BRANCH: opts.branch!, BASE_BRANCH: config.baseBranch }),
-  };
+  });
 
   const runName = isPrd
     ? `write-prd-pr-#${opts.prdNumber}`

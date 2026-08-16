@@ -333,8 +333,9 @@ FAKE_SETTINGS_FILE_2B="$FAKE_HOME3B/.claude/settings.json"
 HOSTED_PROXY_URL="https://proxy.example.test"
 mkdir -p "$(dirname "$FAKE_SETTINGS_FILE_2B")" "$FAKE_REPO/scripts"
 cp scripts/claude_enable.py scripts/proxy_status.py "$FAKE_REPO/scripts/"
-# claude_enable.py imports proxy_endpoint (canonical endpoint resolver, refs
-# #110) — copy it too so the harness exercises the same code the proxy runs.
+# claude_enable.py imports proxy_endpoint (canonical endpoint resolver) on the
+# architecture-review branch; copy it too when present so the harness exercises
+# the same code the proxy runs (refs #110, #146).
 if [ -f scripts/proxy_endpoint.py ]; then
     cp scripts/proxy_endpoint.py "$FAKE_REPO/scripts/"
 fi

@@ -39,8 +39,11 @@ jobs:
             exit 1
           fi
 
-          # All explicit aliases except the '*' wildcard.
-          aliases=$(python3 -c "import yaml; d=yaml.safe_load(open('litellm_config.yaml')); print('\n'.join(m['model_name'] for m in d.get('model_list',[]) if m.get('model_name') and m['model_name'] != '*'))")
+          # Concrete, probe-safe aliases — exclude the wildcard '*' and any
+          # fallback lane ('*-fallback') so we only probe real upstreams.
+          # openrouter/* and github_copilot/* are not concrete models: probing
+          # them returns HTTP 400 and pollutes every model-health report.
+          aliases=$(python3 -c "import yaml; d=yaml.safe_load(open('litellm_config.yaml')); print('\n'.join(m['model_name'] for m in d.get('model_list',[]) if m.get('model_name') and m['model_name'] != '*' and not m['model_name'].endswith('-fallback')))")
           # Fail fast: a parse error or missing PyYAML yields an empty list, which
           # would otherwise sail through below as "all healthy" (a false green).
           if [ -z "$(printf '%s' "$aliases" | tr -d '[:space:]')" ]; then
@@ -55,7 +58,11 @@ jobs:
             exit 1
           fi
 
+          # `broken` = hard failures (page). `degraded` = proxy up but empty
+          # completion (warning only) — the empty-200 quirk is non-actionable
+          # and was the source of the daily false alarms on #148.
           broken=""
+          degraded=""
           while IFS= read -r m; do
             [ -n "$m" ] || continue
             if ! probe_out=$(
@@ -74,8 +81,8 @@ jobs:
                 echo "  ✅ $m"
                 ;;
               degraded)
-                echo "  ⚠️ $m (HTTP $http_code, $detail)"
-                broken="$broken $m"
+                echo "  ⚠️ $m (HTTP $http_code, $detail) — empty completion, not paging"
+                degraded="$degraded $m"
                 ;;
               *)
                 echo "  ❌ $m (HTTP $http_code, $detail)"
@@ -90,6 +97,10 @@ jobs:
             echo "status=ok" >> "$GITHUB_OUTPUT"
             echo "All configured aliases are healthy."
           fi
+          if [ -n "$degraded" ]; then
+            echo "::warning::Degraded (empty completions, not paging):${degraded}"
+            echo "degraded=$degraded" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Open or update the model-health issue
         if: steps.probe.outputs.status == 'fail'
@@ -103,7 +114,9 @@ jobs:
           body: |
             These `litellm_config.yaml` aliases failed a completion through the proxy at __TIMESTAMP__:
 
-            **Failing:**${{ steps.probe.outputs.broken }}
+            **Failing (hard):**${{ steps.probe.outputs.broken }}
+
+            ${{ steps.probe.outputs.degraded && format('**Degraded (empty, not paging):**{0}', steps.probe.outputs.degraded) || '' }}
 
             Usually means the upstream provider changed model availability (the same 'no choices' class that forced the sonnet -> opus-4.8 remap). Update the alias targets in `litellm_config.yaml`.
 

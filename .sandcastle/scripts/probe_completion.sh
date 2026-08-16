@@ -131,9 +131,6 @@ if ! payload=$(python3 -c 'import json,sys; print(json.dumps({"model":sys.argv[1
   exit 0
 fi
 
-# Locate the shared probe_parser module (repo-root scripts/).
-PROBE_PARSER="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/probe_parser.py"
-
 # Bash arithmetic loop (not seq) — safe for retries=0.
 for ((i = 1; i <= retries; i++)); do
   http_code=$(curl -s -o "$body_file" -w '%{http_code}' --max-time "$curl_timeout" \
@@ -144,26 +141,41 @@ for ((i = 1; i <= retries; i++)); do
     -d "$payload" \
     || true)
   [ -n "$http_code" ] || http_code="000"
-
-  # Classify the response via the shared probe_parser module (refs #112).
-  # Outputs: status=yes|no, format=sse|json|unknown, hard=true|false, detail=...
-  classification=$(python3 "$PROBE_PARSER" "$http_code" < "$body_file" 2>/dev/null || true)
-  has=$(printf '%s\n' "$classification" | sed -n 's/^status=//p')
-  fmt=$(printf '%s\n' "$classification" | sed -n 's/^format=//p')
-  is_hard=$(printf '%s\n' "$classification" | sed -n 's/^hard=//p')
-  hard_detail=$(printf '%s\n' "$classification" | sed -n 's/^detail=//p')
-
-  if [ "$is_hard" = "true" ]; then
-    hard="$hard_detail"
-    break
-  fi
-
+  etype=$(python3 -c "import json,sys; print(json.load(sys.stdin).get('error',{}).get('type',''))" < "$body_file" 2>/dev/null || true)
   case "$http_code" in
     200)
-      if [ "$fmt" = "sse" ]; then
+      # Some proxy configs (litellm_params.stream:true) force SSE on all
+      # completions — even non-streaming probe requests. An SSE body starts
+      # with "event:", "data:", or bare ":" (keep-alive comment) lines and is
+      # not valid JSON; parse content_block_delta events instead of
+      # d.get('content'). Non-SSE path is unchanged (backwards-compatible).
+      if head -c 128 "$body_file" | grep -qE '^(event:|data:|:)'; then
+        has=$(python3 - "$body_file" <<'PY' 2>/dev/null || echo no
+import json, sys
+rv = 'no'
+for l in open(sys.argv[1]):
+    if l.startswith('data:') and l.rstrip('\r\n') not in ('data: [DONE]', 'data:[DONE]'):
+        raw = l[5:].lstrip(' ')
+        try:
+            d = json.loads(raw)
+            if d.get('type') == 'content_block_delta' and d.get('delta', {}).get('text'):
+                rv = 'yes'
+                break
+        except Exception:
+            pass
+print(rv)
+PY
+)
         [ "$has" = "yes" ] && log "completion attempt $i/$retries: 200 SSE with content ✓" \
                            || log "completion attempt $i/$retries: 200 SSE — empty content"
       else
+        # Non-streaming JSON path — a non-JSON, non-SSE 200 is a hard proxy bug.
+        if ! python3 -c "import json,sys; json.load(sys.stdin)" < "$body_file" 2>/dev/null; then
+          hard="200 but response body was not valid JSON — proxy/upstream serving malformed completions"
+          break
+        fi
+        has=$(python3 -c "import json,sys; d=json.load(sys.stdin); print('yes' if d.get('content') else 'no')" \
+            < "$body_file" 2>/dev/null || echo no)
         [ "$has" = "yes" ] && log "completion attempt $i/$retries: 200 JSON with content ✓" \
                            || log "completion attempt $i/$retries: 200 JSON — empty content"
       fi
@@ -173,7 +185,11 @@ for ((i = 1; i <= retries; i++)); do
       fi
       empty_seen=yes
       ;;
-    *) log "completion attempt $i/$retries: HTTP $http_code — retrying" ;;
+    401 | 403) hard="auth error HTTP $http_code${etype:+ (type=$etype)} — master key likely wrong/mismatched"; break ;;
+    400)       hard="HTTP 400${etype:+ (type=$etype)} — e.g. no_db_connection / bad request"; break ;;
+    000)       hard="connection failed — proxy unreachable"; break ;;
+    5*)        hard="upstream HTTP $http_code${etype:+ (type=$etype)}"; break ;;
+    *)         log "completion attempt $i/$retries: HTTP $http_code — retrying" ;;
   esac
   if [ "$i" -lt "$retries" ]; then
     sleep "$interval"

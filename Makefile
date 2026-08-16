@@ -7,7 +7,7 @@ help:
 	@echo "claude-code-copilot"
 	@echo "─────────────────────────────────────────"
 	@echo "  make setup               Set up .env with generated keys"
-	@echo "  make start               Start LiteLLM proxy (Copilot primary, OpenRouter fallback)"
+	@echo "  make start               Start LiteLLM proxy (OpenRouter primary, Copilot fallback)"
 	@echo "  make stop                Stop the proxy"
 	@echo "  make test                Test proxy is working (non-streaming)"
 	@echo "  make test-stream         Test proxy streaming (SSE) response"
@@ -56,10 +56,9 @@ start:
 	@if [ ! -f .env ]; then echo "❌ .env not found. Run 'make setup' first."; exit 1; fi
 	@set -a && . ./.env && set +a && \
 	PORT=$${LITELLM_PORT:-$(PORT)} && \
-	echo "Starting LiteLLM proxy (GitHub Copilot primary, OpenRouter fallback) on port $$PORT..." && \
-	source scripts/_launch_proxy.sh && \
-	launch_proxy "$$PORT" "litellm_config.yaml"
-
+     echo "Starting LiteLLM proxy (OpenRouter primary, GitHub Copilot fallback) on port $$PORT..." && \
+     source scripts/_launch_proxy.sh && \
+     launch_proxy "$$PORT" "litellm_config.yaml"
 stop:
 	@if [ ! -f .env ]; then echo "❌ .env not found. Run 'make setup' first."; exit 1; fi
 	@set -a && . ./.env && set +a && \

@@ -25,6 +25,12 @@ export function deferToIssue(opts: { scored: ScoredComment; pr: PrContext; threa
   const titleSnippet = comment.body.slice(0, 60).replace(/\n/g, " ");
   const title = `review: ${titleSnippet}`;
 
+  // The shft/hitl labels are review metadata that may not exist in every target
+  // repo. Guard on their presence so gh issue create --label fails cleanly when
+  // they are absent instead of erroring (or creating issues with no labels).
+  const useReviewLabels = reviewLabelsExist({ owner: pr.owner, repo: pr.repo, cwd });
+  const labelArgs = useReviewLabels ? ["--label", "shft", "--label", "hitl"] : [];
+
   const signalList = signals.map((s) => `- ${s.label}: ${s.delta > 0 ? "+" : ""}${s.delta}`).join("\n");
 
   const body = [
@@ -47,7 +53,7 @@ export function deferToIssue(opts: { scored: ScoredComment; pr: PrContext; threa
     .join("\n");
 
   // Check for existing issue with same title to avoid duplicates
-  const existing = findExistingIssue({ title, owner: pr.owner, repo: pr.repo, cwd });
+  const existing = findExistingIssue({ title, owner: pr.owner, repo: pr.repo, cwd, useReviewLabels });
   if (existing) {
     postThreadReply({ threadId, body: `Deferred to #${existing.number} — score ${score}/100 (HITL tier)`, cwd });
     resolveThread({ threadId, cwd });
@@ -57,7 +63,7 @@ export function deferToIssue(opts: { scored: ScoredComment; pr: PrContext; threa
   // Create the issue
   const issueUrl = shFile(
     "gh",
-    ["issue", "create", "--repo", `${pr.owner}/${pr.repo}`, "--title", title, "--body", body, "--label", "shft", "--label", "hitl"],
+    ["issue", "create", "--repo", `${pr.owner}/${pr.repo}`, "--title", title, "--body", body, ...labelArgs],
     cwd,
   ).trim();
 
@@ -78,11 +84,25 @@ function parseIssueNumber(issueUrl: string): number {
   return parseInt(match[1]!, 10);
 }
 
-function findExistingIssue(opts: { title: string; owner: string; repo: string; cwd: string }): { number: number; url: string } | null {
+function reviewLabelsExist(opts: { owner: string; repo: string; cwd: string }): boolean {
   try {
+    const result = shFile("gh", ["label", "list", "--repo", `${opts.owner}/${opts.repo}`, "--json", "name"], opts.cwd);
+    const labels = JSON.parse(result) as Array<{ name: string }>;
+    return labels.some((l) => l.name === "shft") && labels.some((l) => l.name === "hitl");
+  } catch {
+    return false;
+  }
+}
+
+function findExistingIssue(opts: { title: string; owner: string; repo: string; cwd: string; useReviewLabels: boolean }): { number: number; url: string } | null {
+  try {
+    // Only filter by the review labels when they are known to exist. gh issue
+    // list --label with an unknown label silently matches nothing (AND filter),
+    // which would defeat dedup and create duplicate issues.
+    const labelFilter = opts.useReviewLabels ? ["--label", "shft,hitl"] : [];
     const result = shFile(
       "gh",
-      ["issue", "list", "--repo", `${opts.owner}/${opts.repo}`, "--label", "shft,hitl", "--state", "open", "--search", opts.title, "--json", "number,url,title", "--limit", "5"],
+      ["issue", "list", "--repo", `${opts.owner}/${opts.repo}`, ...labelFilter, "--state", "open", "--search", opts.title, "--json", "number,url,title", "--limit", "5"],
       opts.cwd,
     );
 

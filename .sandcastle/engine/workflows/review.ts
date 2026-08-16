@@ -6,7 +6,7 @@ import { ReviewOutput } from "../schemas/review-output.js";
 import { fetchPrComments } from "../lib/fetch-pr-comments.js";
 import { postReview } from "../lib/post-review.js";
 import { loadConfig } from "../lib/config.js";
-import { resolvePrompt, configPromptArgs } from "../lib/resolve-prompt.js";
+import { resolvePrompt, configPromptArgs, filterPromptArgs } from "../lib/resolve-prompt.js";
 import { runWithRetry } from "../lib/run-with-retry.js";
 import { resolveDefaultTemplatesDir } from "../lib/default-template-paths.js";
 
@@ -32,11 +32,11 @@ export async function runReview(opts: { prNumber: string; repoDir: string; model
     sandbox: noSandbox(),
     cwd: repoDir,
     promptFile,
-    promptArgs: {
+    promptArgs: filterPromptArgs(promptFile, {
       ...configPromptArgs(config),
       PR_NUMBER: prNumber,
       PR_COMMENTS_JSON: JSON.stringify(prContext.comments, null, 2),
-    },
+    }),
     output: Output.object({ tag: "output", schema: ReviewOutput }),
     logging: { type: "stdout" },
   });

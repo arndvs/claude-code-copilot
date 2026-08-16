@@ -19,7 +19,7 @@ source "$SCRIPT_DIR/scripts/_launch_proxy.sh"
 
 PORT="${LITELLM_PORT:-4000}"
 
-echo "Starting LiteLLM proxy (GitHub Copilot primary, OpenRouter fallback) on port ${PORT}..."
+echo "Starting LiteLLM proxy (OpenRouter primary, GitHub Copilot fallback) on port ${PORT}..."
 echo ""
 echo "After the proxy starts, configure Claude Code:"
 echo ""
