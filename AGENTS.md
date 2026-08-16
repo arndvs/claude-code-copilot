@@ -20,7 +20,7 @@ Claude Code  →  LiteLLM (:4000)  →  api.githubcopilot.com (primary)
 
 | File | Purpose |
 |------|---------|
-| `litellm_config.yaml` | Proxy routing config — Copilot primary, `openrouter/*` fallback |
+| `litellm_config.yaml` | Proxy routing config — OpenRouter primary, Copilot fallback |
 | `Makefile` | Workflow automation (setup/start/stop/test/enable/disable) |
 | `start_proxy.sh` | Standalone proxy launcher with `.env` loading |
 | `scripts/claude_enable.py` | Write proxy env vars to `~/.claude/settings.json` |

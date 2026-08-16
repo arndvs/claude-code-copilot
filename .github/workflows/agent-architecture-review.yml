@@ -9,7 +9,7 @@ on:
 jobs:
   architecture-review:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     concurrency:
       group: agent-architecture-review
       cancel-in-progress: false
@@ -19,38 +19,59 @@ jobs:
       issues: write
 
     env:
-      GH_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
       GH_REPO: ${{ github.repository }}
 
     steps:
-      - name: Checkout code
+      - name: Checkout workflow actions
         uses: actions/checkout@v4
         with:
-          ref: main
-          fetch-depth: 1
+          ref: dev
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Install engine dependencies
-        run: |
-          corepack enable
-          cd .sandcastle/engine
-          pnpm install --frozen-lockfile
-          echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
-
-      - name: Run architecture review
+      - name: Proxy preflight
+        id: proxy-preflight
         env:
           ANTHROPIC_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.LITELLM_MASTER_KEY }}
-          OUTPUT_DIR: ${{ runner.temp }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: bash .sandcastle/scripts/proxy_preflight.sh
+
+      - name: Sandcastle setup
+        if: steps.proxy-preflight.outputs.should_run == 'true'
+        uses: ./.github/actions/sandcastle-setup
+        with:
+          checkout-ref: dev
+          checkout-fetch-depth: 1
+          skip-checkout: true
+          token: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          manage-labels: false
+
+      - name: Run architecture review
+        if: steps.proxy-preflight.outputs.should_run == 'true'
+        env:
+          ANTHROPIC_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.LITELLM_MASTER_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
+          set -euo pipefail
           cd .sandcastle/engine
-          pnpm --ignore-workspace exec tsx ../run.ts architecture-review
+          max_attempts=2
+          for attempt in $(seq 1 "$max_attempts"); do
+            echo "Architecture review attempt $attempt/$max_attempts"
+            if pnpm --ignore-workspace exec tsx ../run.ts architecture-review; then
+              exit 0
+            fi
+            if [ "$attempt" -lt "$max_attempts" ]; then
+              echo "::warning::Architecture review attempt $attempt failed; retrying once in 30 seconds."
+              sleep 30
+            fi
+          done
+          echo "Architecture review failed after $max_attempts attempts."
+          exit 1
 
       - name: Publish PRD issue
+        if: steps.proxy-preflight.outputs.should_run == 'true'
         id: publish
         env:
           OUTPUT_FILE: ${{ runner.temp }}/architecture_review_output.json

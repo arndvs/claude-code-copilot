@@ -2,18 +2,21 @@
  * lint-pipeline-labels.ts — Static linter for agent-*.yml label transitions.
  *
  * Parses workflow YAML files, extracts `--add-label` / `--remove-label`
- * operations, and validates added labels against pipeline object-type constraints.
+ * operations, and validates them against the pipeline state machine:
+ *   - object-type constraints (which labels may appear on issues vs PRs)
+ *   - transition legality (each added label must be a declared successor of
+ *     the workflow's trigger label)
+ *   - mutual exclusions (conflicting labels must not coexist)
  *
  * Usage:
- *   cd .sandcastle/engine
- *   pnpm exec tsx lib/lint-pipeline-labels.ts --workflows-dir ../../.github/workflows
+ *   pnpm exec tsx path/to/engine/lib/lint-pipeline-labels.ts [--workflows-dir .github/workflows]
  *
  * Exit 0 if all transitions are valid; exit 1 on violations.
  */
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { LABELS } from "./pipeline-states.js";
+import { validateTransition } from "./pipeline-states.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -36,6 +39,8 @@ interface Violation {
 const LABEL_RE =
   /gh\s+(?:issue|pr)\s+edit\b.*?--(add|remove)-label\s+"([^"]+)"/g;
 const OBJECT_TYPE_RE = /gh\s+(issue|pr)\s+edit/;
+// Trigger label from a job's `if: github.event.label.name == 'X'` condition.
+const TRIGGER_RE = /github\.event\.label\.name\s*==\s*['"]([^'"]+)['"]/;
 
 interface LogicalLine {
   text: string;
@@ -86,6 +91,12 @@ function lineForIndex(logical: LogicalLine, index: number): number {
   return logical.startLine + offset;
 }
 
+/** Extract the trigger label from a workflow's job `if:` conditions. */
+function extractTriggerLabel(content: string): string | undefined {
+  const match = TRIGGER_RE.exec(content);
+  return match?.[1];
+}
+
 function extractLabelOps(filePath: string): LabelOp[] {
   const content = fs.readFileSync(filePath, "utf8");
   const lines = content.split("\n");
@@ -114,24 +125,46 @@ function extractLabelOps(filePath: string): LabelOp[] {
 
 // ── Validate ─────────────────────────────────────────────────────────────────
 
-function validateOps(ops: LabelOp[]): Violation[] {
+function validateOps(ops: LabelOp[], triggerLabel?: string): Violation[] {
   const violations: Violation[] = [];
 
+  // Group ops by (file, line) — each logical line is one transition step.
+  const steps = new Map<string, LabelOp[]>();
   for (const op of ops) {
-    if (op.action !== "add") continue; // only validate adds
+    const key = `${op.file}:${op.line}`;
+    const group = steps.get(key) ?? [];
+    group.push(op);
+    steps.set(key, group);
+  }
 
-    const def = LABELS[op.label];
-    if (!def) {
-      // Unknown label — warning, not a violation
-      continue;
-    }
+  for (const group of steps.values()) {
+    const adds = group.filter((o) => o.action === "add");
+    const removes = group.filter((o) => o.action === "remove");
+    const objectType = group[0]!.objectType;
 
-    // Object-type check
-    if (!def.appliesTo.includes(op.objectType)) {
+    // Transition legality, object-type constraints, and mutual exclusions are
+    // all validated by the shared state machine. `current` = labels on the
+    // object when the job starts: the trigger label (always present) plus any
+    // labels being removed on this line. Seeding the trigger label ensures the
+    // mutual-exclusion check catches a workflow that adds a label mutually
+    // exclusive with the trigger but forgets to remove it.
+    const current = new Set<string>(removes.map((o) => o.label));
+    if (triggerLabel) current.add(triggerLabel);
+
+    const result = validateTransition(
+      [...current],
+      {
+        add: adds.map((o) => o.label),
+        remove: removes.map((o) => o.label),
+      },
+      objectType,
+      triggerLabel,
+    );
+    for (const err of result.errors) {
       violations.push({
-        file: op.file,
-        line: op.line,
-        message: `Label "${op.label}" applied to ${op.objectType} but only allowed on: ${def.appliesTo.join(", ")}`,
+        file: group[0]!.file,
+        line: group[0]!.line,
+        message: err,
       });
     }
   }
@@ -180,9 +213,11 @@ function main(): void {
   const allViolations: Violation[] = [];
 
   for (const file of files) {
+    const content = fs.readFileSync(file, "utf8");
+    const triggerLabel = extractTriggerLabel(content);
     const ops = extractLabelOps(file);
     totalOps += ops.length;
-    const violations = validateOps(ops);
+    const violations = validateOps(ops, triggerLabel);
     allViolations.push(...violations);
   }
 

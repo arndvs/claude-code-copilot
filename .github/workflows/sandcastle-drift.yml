@@ -1,0 +1,105 @@
+name: "Sandcastle: Detect Drift"
+
+# Detect drift between the vendored .sandcastle/ + .github/workflows/agent-*.yml
+# and the ctrlshft producer source (dotfiles/shft). If the vendored files have
+# drifted from source, open a PR to re-vendor them.
+#
+# This is the safety net that guarantees producer changes (gitflow guards,
+# security hardening, engine updates) actually reach consumer repos. Without it,
+# a repo that misses `ctrl update-sandcastle` silently drifts and workflows break
+# (the proxy_preflight.sh incident).
+#
+# NOTE: This workflow is itself vendored. It runs `update-sandcastle.sh --dry-run`
+# which compares against the producer source at $DOTFILES/shft. The producer path
+# is resolved from the DOTFILES env var (defaults to ~/dotfiles).
+
+on:
+  schedule:
+    - cron: "41 9 * * 1" # Mondays 09:41 UTC — weekly drift check
+  workflow_dispatch:
+
+jobs:
+  detect-drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      DOTFILES: ${{ github.workspace }}/dotfiles
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Checkout producer source (dotfiles)
+        uses: actions/checkout@v4
+        with:
+          repository: arndvs/dotfiles-private
+          token: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+          path: dotfiles
+          fetch-depth: 1
+
+      - name: Run drift detection (dry-run)
+        id: drift
+        run: |
+          set -euo pipefail
+          if [ ! -f ".sandcastle/engine" ] && [ ! -d ".sandcastle/engine" ]; then
+            echo "No .sandcastle/engine/ — sandcastle not initialized. Skipping."
+            echo "drift=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # update-sandcastle.sh --dry-run exits 0 with "No drift detected" or
+          # prints the drift report. Capture both the exit code and output.
+          set +e
+          output="$(bash "$DOTFILES/bin/update-sandcastle.sh" --dry-run 2>&1)"
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ] && ! echo "$output" | grep -q "Drift detected"; then
+            echo "No drift detected. Vendored files match producer source."
+            echo "drift=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Drift detected:"
+            echo "$output"
+            echo "drift=true" >> "$GITHUB_OUTPUT"
+            # Persist the report for the PR body
+            echo "$output" > /tmp/sandcastle-drift-report.txt
+          fi
+
+      - name: Open re-vendor PR if drift detected
+        if: steps.drift.outputs.drift == 'true'
+        run: |
+          set -euo pipefail
+          branch="sandcastle/revendor-$(date +%Y%m%d)"
+          git config user.name "sandcastle-drift[bot]"
+          git config user.email "sandcastle-drift[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          # Re-vendor by running the update script non-interactively (answer 'a' to update all)
+          echo "a" | bash "$DOTFILES/bin/update-sandcastle.sh" >/dev/null 2>&1 || true
+          if git diff --quiet; then
+            echo "No changes after re-vendor — drift report only."
+            exit 0
+          fi
+          git add -A
+          git commit -m "chore(sandcastle): re-vendor from producer source
+
+          Automated by the Sandcastle drift-detection workflow. Re-syncs vendored
+          .sandcastle/ and .github/workflows/agent-*.yml with the ctrlshft producer.
+
+          Drift report:
+          $(cat /tmp/sandcastle-drift-report.txt)"
+          git push origin "$branch"
+          # Open PR to the default branch
+          gh pr create \
+            --base "dev" \
+            --head "$branch" \
+            --title "chore(sandcastle): re-vendor from producer source" \
+            --body "Automated re-vendor PR from the Sandcastle drift-detection workflow.
+
+            Detected drift between vendored Sandcastle files and the producer source.
+            This PR re-syncs them. Review and merge to keep this repo's pipeline current.
+
+            $(cat /tmp/sandcastle-drift-report.txt)"

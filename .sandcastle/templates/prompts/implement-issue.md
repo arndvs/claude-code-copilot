@@ -14,7 +14,7 @@ Read the issue before editing:
 gh issue view {{ISSUE_NUMBER}} --comments
 ```
 
-Read `CONTEXT.md` and relevant ADRs under `docs/adr/` if they exist.
+Read `{{CONTEXT_DOC}}` and relevant ADRs under `{{ADR_DIR}}` if they exist.
 Explore the codebase and tests that touch the area you will change.
 
 # EXECUTION

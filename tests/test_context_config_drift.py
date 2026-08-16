@@ -67,10 +67,10 @@ def _context_table(markdown: str) -> dict[str, str]:
 
 
 def _config_model_map(config: dict) -> dict[str, str]:
-    """Map primary (non-fallback) model_names to their Copilot target.
+    """Map primary (non-fallback) model_names to their OpenRouter target.
 
-    The CONTEXT.md table documents the primary Copilot target for each alias,
-    so fallback (OpenRouter) entries are excluded here.
+    The CONTEXT.md table documents the primary OpenRouter target for each alias,
+    so fallback (Copilot) entries are excluded here.
     """
     model_list = config.get("model_list", [])
     assert isinstance(model_list, list) and model_list, "model_list must be non-empty"
@@ -84,11 +84,11 @@ def _config_model_map(config: dict) -> dict[str, str]:
 
 
 def test_context_model_mapping_matches_litellm_config(context_text, config):
-    section = _section(context_text, "1. LiteLLM → Copilot routing (with OpenRouter fallback)", "2. DB-less default mode")
+    section = _section(context_text, "1. LiteLLM → Copilot routing (with OpenRouter primary)", "2. DB-less default mode")
     model_table = _between(
         section,
-        "| Alias (Claude Code sends) | Primary (Copilot) | Fallback (OpenRouter) |",
-        "Primary entries carry the four editor headers",
+        "| Alias (Claude Code sends) | Primary (OpenRouter) | Fallback (Copilot) |",
+        "Primary entries carry an `api_key`",
     )
     assert _context_table(model_table) == _config_model_map(config)
 

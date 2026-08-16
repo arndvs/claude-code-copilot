@@ -82,11 +82,13 @@ else
     fail "Missing OpenRouter provider or fallback reference"
 fi
 
-# 4b: Mentions the wildcard catch-all
-if grep -Eq 'wildcard|"[*]"' "$FILE"; then
-    pass "References wildcard catch-all"
+# 4b: No wildcard — openrouter/* is not a concrete model (400 no_db_connection)
+# and github_copilot/* silently passes unknown models through; every alias has an
+# explicit concrete fallback, unknown models fail loudly.
+if grep -Eq 'No wildcard|no wildcard|fail loudly by design' "$FILE"; then
+    pass "Documents no-wildcard design (fail-loud for unknown models)"
 else
-    fail "Missing wildcard catch-all reference"
+    fail "Missing no-wildcard design statement"
 fi
 
 # 4c: Mentions master_key auth

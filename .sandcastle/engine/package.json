@@ -7,6 +7,8 @@
   "scripts": {
     "test": "echo \"Vendored Sandcastle engine excludes test files; run the repo typecheck script (for example, pnpm run typecheck) to validate runtime sources.\"",
     "typecheck": "tsc --noEmit",
+    "pipeline-artifacts:check": "tsx scripts/pipeline-artifacts.ts --check",
+    "pipeline-artifacts:write": "tsx scripts/pipeline-artifacts.ts --write",
     "start": "echo 'Use workflow runners via .sandcastle/run.ts dispatcher'"
   },
   "dependencies": {

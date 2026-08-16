@@ -1,11 +1,13 @@
 """Tests for the model-entry structural contract in litellm_config.yaml.
 
 Every ``model_list`` entry must satisfy the contract documented in CONTEXT.md §1.
-The proxy is dual-provider: each alias has a PRIMARY (GitHub Copilot) and a
-FALLBACK (OpenRouter) deployment. This is an executable specification of "what a
-correct model entry looks like" — it catches config errors at PR time instead of
-at runtime (the daily ``model-health.yml`` probe, which needs secrets and can't
-tell "provider changed availability" from "the config is structurally wrong").
+The proxy is dual-provider: each alias has a PRIMARY (OpenRouter — the default
+upstream) and a FALLBACK (GitHub Copilot) deployment. OpenRouter serves real
+completions reliably; Copilot is the automatic fallback lane per alias. This is
+an executable specification of "what a correct model entry looks like" — it
+catches config errors at PR time instead of at runtime (the daily
+``model-health.yml`` probe, which needs secrets and can't tell "provider changed
+availability" from "the config is structurally wrong").
 
 Refs #80
 """
@@ -21,13 +23,13 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = REPO_ROOT / "litellm_config.yaml"
 
-# Primary deployments route through the GitHub Copilot provider.
-COPILOT_MODEL_PREFIX = "github_copilot/"
-
-# Fallback deployments route through the OpenRouter provider.
+# Primary deployments route through the OpenRouter provider (default upstream).
 OPENROUTER_MODEL_PREFIX = "openrouter/"
 
-# Fallback entries carry an api_key read from the environment.
+# Fallback deployments route through the GitHub Copilot provider.
+COPILOT_MODEL_PREFIX = "github_copilot/"
+
+# Primary entries carry an api_key read from the environment.
 API_KEY_REF = "os.environ/OPENROUTER_API_KEY"
 
 # Fallback model_names are the primary name + this suffix.
@@ -105,44 +107,46 @@ class TestModelEntryContract:
                 f"non-empty model_name (CONTEXT.md §1)."
             )
 
-    def test_primaries_target_github_copilot(self, config):
-        """Primary (non-fallback) entries must use the github_copilot/ prefix.
+    def test_primaries_target_openrouter(self, config):
+        """Primary (non-fallback) entries must use the openrouter/ prefix.
 
-        A typo in the prefix routes to the wrong LiteLLM provider and fails at
-        runtime with a confusing error instead of at PR time.
+        OpenRouter is the default upstream. A typo in the prefix routes to the
+        wrong LiteLLM provider and fails at runtime with a confusing error
+        instead of at PR time.
         """
         for entry in _model_list(config):
             name = entry.get("model_name", "<unnamed>")
             if _is_fallback(name):
                 continue
             model = _litellm_params(entry).get("model")
-            assert isinstance(model, str) and model.startswith(COPILOT_MODEL_PREFIX), (
+            assert isinstance(model, str) and model.startswith(OPENROUTER_MODEL_PREFIX), (
                 f"Primary model '{name}' routes to {model!r}; expected a value "
-                f"starting with {COPILOT_MODEL_PREFIX!r} (CONTEXT.md §1)."
+                f"starting with {OPENROUTER_MODEL_PREFIX!r} (CONTEXT.md §1)."
             )
 
-    def test_fallbacks_target_openrouter_with_api_key(self, config):
-        """Fallback entries must route to openrouter/ and carry the API key."""
+    def test_fallbacks_target_copilot_with_headers(self, config):
+        """Fallback entries must route to github_copilot/ and carry the editor headers."""
         for entry in _model_list(config):
             name = entry.get("model_name", "<unnamed>")
             if not _is_fallback(name):
                 continue
             params = _litellm_params(entry)
             model = params.get("model")
-            assert isinstance(model, str) and model.startswith(OPENROUTER_MODEL_PREFIX), (
+            assert isinstance(model, str) and model.startswith(COPILOT_MODEL_PREFIX), (
                 f"Fallback model '{name}' routes to {model!r}; expected a value "
-                f"starting with {OPENROUTER_MODEL_PREFIX!r} (CONTEXT.md §1)."
+                f"starting with {COPILOT_MODEL_PREFIX!r} (CONTEXT.md §1)."
             )
-            assert params.get("api_key") == API_KEY_REF, (
-                f"Fallback model '{name}' has api_key={params.get('api_key')!r}; "
-                f"expected {API_KEY_REF!r} (CONTEXT.md §1)."
+            headers = params.get("extra_headers", {})
+            assert isinstance(headers, dict) and headers, (
+                f"Fallback model '{name}' has extra_headers={headers!r}; "
+                f"every Copilot fallback must carry the four editor headers (CONTEXT.md §1)."
             )
 
     def test_every_primary_has_a_fallback(self, config):
         """Every primary alias must have a matching fallback wired in router_settings.
 
-        The whole point of the dual-provider setup is resilience: if Copilot
-        fails, the router falls back to OpenRouter. A primary without a fallback
+        The whole point of the dual-provider setup is resilience: if OpenRouter
+        fails, the router falls back to Copilot. A primary without a fallback
         silently loses that resilience.
 
         LiteLLM expects ``router_settings.fallbacks`` as a LIST of dicts, e.g.
@@ -171,7 +175,7 @@ class TestModelEntryContract:
                 continue
             assert name in fallback_map, (
                 f"Primary model '{name}' has no entry in router_settings.fallbacks; "
-                f"it will not fall back to OpenRouter on Copilot failure (CONTEXT.md §1)."
+                f"it will not fall back to Copilot on OpenRouter failure (CONTEXT.md §1)."
             )
             fb_list = fallback_map[name]
             assert isinstance(fb_list, list) and fb_list, (

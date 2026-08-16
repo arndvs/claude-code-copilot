@@ -1,25 +1,37 @@
 # CONTEXT.md — claude-code-copilot
 
-## 1. LiteLLM → Copilot routing (with OpenRouter fallback)
+## 1. LiteLLM → Copilot routing (with OpenRouter primary)
 
 LiteLLM translates Anthropic Messages API calls into GitHub Copilot API calls.
-`litellm_config.yaml` maps Claude Code's hyphenated model names to Copilot's dotted names.
-Each alias has a **primary** (GitHub Copilot) and a **fallback** (OpenRouter) deployment,
-wired via `router_settings.fallbacks` so the proxy stays up if Copilot fails.
+`litellm_config.yaml` maps Claude Code's hyphenated model names to concrete upstream models.
+Each alias has a **primary** (OpenRouter) and a **fallback** (GitHub Copilot) deployment,
+wired via `router_settings.fallbacks` so the proxy stays up if OpenRouter fails.
 
-| Alias (Claude Code sends) | Primary (Copilot) | Fallback (OpenRouter) |
+OpenRouter is the **default upstream**. GitHub Copilot's Claude models were returning
+empty-200 ('no choices') completions through the proxy — which LiteLLM treats as *success*
+and therefore never fails over. OpenRouter serves real completions reliably, so every
+concrete alias defaults to a concrete `openrouter/...` model, with Copilot as the automatic
+fallback lane. The dual-provider structure is preserved: flipping orientations is a config
+edit, not a code change.
+
+| Alias (Claude Code sends) | Primary (OpenRouter) | Fallback (Copilot) |
 |---|---|---|
-| `claude-sonnet-4-6` | `github_copilot/claude-opus-4.8` | `openrouter/deepseek/deepseek-v4-flash-0731` |
-| `claude-haiku-4-5-20251001` | `github_copilot/claude-opus-4.8` (Copilot has no Haiku) | `openrouter/deepseek/deepseek-v4-flash-0731` |
-| `claude-opus-4-6` | `github_copilot/claude-opus-4.6` | `openrouter/deepseek/deepseek-v4-flash-0731` |
-| `claude-opus-4-7` | `github_copilot/claude-opus-4.7` | `openrouter/deepseek/deepseek-v4-flash-0731` |
-| `*` (wildcard) | `github_copilot/*` — catch-all pass-through | `openrouter/*` |
+| `claude-sonnet-4-6` | `openrouter/deepseek/deepseek-v4-flash-0731` | `github_copilot/claude-opus-4.6` |
+| `claude-haiku-4-5-20251001` | `openrouter/deepseek/deepseek-v4-flash-0731` | `github_copilot/claude-opus-4.6` (Copilot has no Haiku) |
+| `claude-opus-4-6` | `openrouter/deepseek/deepseek-v4-flash-0731` | `github_copilot/claude-opus-4.6` |
+| `claude-opus-4-7` | `openrouter/deepseek/deepseek-v4-flash-0731` | `github_copilot/claude-opus-4.6` |
 
-Primary entries carry the four editor headers Copilot validates; fallback entries carry an `api_key` referencing the OpenRouter key from the environment.
+No wildcard: `openrouter/*` is not a concrete model (HTTP 400 `no_db_connection`) and `github_copilot/*` silently passes unknown models through. Every alias has an explicit concrete fallback above; unknown models fail loudly by design.
+
+Primary entries carry an `api_key` referencing the OpenRouter key from the environment; fallback entries carry the four editor headers Copilot validates.
 
 **Auth boundary.** `general_settings.master_key` reads from `LITELLM_MASTER_KEY` env var. Claude Code authenticates to LiteLLM with this key; LiteLLM authenticates to Copilot with the OAuth token cached at `~/.config/litellm/github_copilot/`, and to OpenRouter with `OPENROUTER_API_KEY`. The credentials never cross.
 
+**Proxy-mode key manifest.** The env-var keys that constitute "Claude Code is in proxy mode" are declared once as `PROXY_ENV_KEYS` in `scripts/proxy_status.py` (refs #117): `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS`. `claude_enable.py` writes only these keys and `claude_disable.py` removes only these keys, so a key added to the manifest is written and removed together — preventing a half-disabled state. `OPENROUTER_API_KEY` is a proxy-side credential (in `.env`, used by LiteLLM to reach OpenRouter), not a Claude-settings key, and is intentionally absent from the manifest. `tests/test_proxy_status.py` asserts the manifest matches what enable writes and disable removes.
+
 **Proxy settings.** `drop_params: true` and `additional_drop_params: ["response_format", "thinking"]` are global `litellm_settings` that silently strip parameters the upstream doesn't support. `json_logs: true` enables structured proxy logs, and `callbacks: ["litellm_logger.proxy_handler_instance", "health_version.version_callback_instance"]` registers the metadata logger plus health/version route callback. `stream: true` is set in `litellm_params` on every route to reduce empty-content 200s from the Anthropic adapter — streaming delivers chunks incrementally and avoids the adapter race where a non-streamed response can return empty content.
+
+**Settings-block contract.** The three settings blocks carry safety-critical config and are enforced by `tests/test_settings_contract.py` (refs #119): `drop_params` must be boolean `true`, `additional_drop_params` a list of strings, `callbacks` a non-empty list whose module paths resolve to existing files at the repo root, `general_settings.master_key` an `os.environ/...` reference, and `router_settings.num_retries` a positive int matching `litellm_settings.num_retries`. No unknown top-level keys are allowed. This is the executable contract for the settings blocks, mirroring the `model_list` contract in `test_model_entry_contract.py` (refs #80).
 
 ## 2. DB-less default mode
 
@@ -78,7 +90,7 @@ Three workflows under `.github/workflows/`:
 
 **Proxy-canary detail.** Retries up to 5 times with 6 s sleep between attempts. Distinguishes hard errors (401/403/400/5xx/unreachable) from the upstream empty-content quirk. On persistent empty content the job sets `status=degraded` and emits a GitHub Actions warning — the proxy is verified as up and authenticating, so it does not page.
 
-**Model-health detail.** Parses `litellm_config.yaml` with PyYAML to extract all non-wildcard aliases. Each alias is probed with 5 retries (4 s apart). Failing aliases are collected and reported in a `model-health` labeled issue. Guards against false greens: if YAML parsing yields zero aliases, the job fails immediately.
+**Model-health detail.** Parses `litellm_config.yaml` with PyYAML to extract all non-wildcard aliases (the wildcard was removed: `openrouter/*` returns HTTP 400 and `github_copilot/*` silently passes unknown models through). Each alias is probed with 5 retries (4 s apart). Failing aliases are collected and reported in a `model-health` labeled issue. Guards against false greens: if YAML parsing yields zero aliases, the job fails immediately.
 
 ## 5. Version endpoint — `/health/version`
 

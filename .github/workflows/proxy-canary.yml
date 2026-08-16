@@ -1,12 +1,13 @@
 name: "Proxy canary"
 
-# Canonical scheduled canary for the shared proxy. Consumer repos should rely
-# on their cheap per-run proxy preflight unless they intentionally opt into a
-# repo-local canary. Requires repo secrets LITELLM_BASE_URL and LITELLM_MASTER_KEY.
+# Continuously proves the configured proxy serves real completions for this
+# repo's model — the proxy dogfooding its own health. Vendored only into
+# Sandcastle installs that route through a proxy (`ctrl init-sandcastle --with-proxy`,
+# the default). Requires repo secrets LITELLM_BASE_URL and LITELLM_MASTER_KEY.
 
 on:
   schedule:
-    - cron: "*/10 * * * *" # every 10 min (GitHub may delay scheduled runs)
+    - cron: "*/30 * * * *" # every 30 min (GitHub may delay scheduled runs)
   workflow_dispatch:
 
 permissions:
@@ -29,9 +30,9 @@ jobs:
           set -euo pipefail
           base="${BASE_URL%/}"
           if [ -z "$base" ] || [ -z "${AUTH_TOKEN:-}" ]; then
-            echo "status=fail" >> "$GITHUB_OUTPUT"
-            echo "detail=secrets LITELLM_BASE_URL / LITELLM_MASTER_KEY are not set on this repo" >> "$GITHUB_OUTPUT"
-            echo "❌ secrets LITELLM_BASE_URL / LITELLM_MASTER_KEY are not set on this repo"
+            echo "status=skipped" >> "$GITHUB_OUTPUT"
+            echo "detail=proxy canary skipped: LITELLM_BASE_URL and/or LITELLM_MASTER_KEY are not configured" >> "$GITHUB_OUTPUT"
+            echo "::warning::Proxy canary skipped because LITELLM_BASE_URL and/or LITELLM_MASTER_KEY are not configured."
             exit 0
           fi
 

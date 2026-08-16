@@ -121,6 +121,15 @@ const workflows: Record<string, WorkflowRunner> = {
     const { runCheckStalePrs } = await import("../workflows/check-stale-prs.js");
     await runCheckStalePrs({ repoDir });
   },
+
+  "keep-tests-tight": async ({ args, repoDir, templatesDir }) => {
+    if (!args.branch) throw new Error("keep-tests-tight requires --branch <ref>");
+    const { runKeepTestsTight } = await import("../workflows/keep-tests-tight.js");
+    const result = await runKeepTestsTight({ branch: args.branch, repoDir, templatesDir });
+    const fs = await import("node:fs");
+    const outputDir = outputDirPath();
+    fs.writeFileSync(join(outputDir, "keep_tests_tight_output.json"), JSON.stringify(result, null, 2));
+  },
 };
 
 export const WORKFLOW_NAMES = Object.keys(workflows);
