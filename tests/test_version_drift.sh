@@ -45,20 +45,24 @@ else
     fail "Dockerfile does not read .litellm-version (expected COPY + cat)"
 fi
 
-# ── Test 3: Makefile reads from .litellm-version ──────────────
-echo "Test 3: Makefile reads version from .litellm-version"
-if grep -Fq 'cat .litellm-version' Makefile; then
-    pass "Makefile reads .litellm-version"
+# ── Test 3: shared launch function reads from .litellm-version ─
+echo "Test 3: shared launch function reads version from .litellm-version"
+# The version is read once in scripts/_launch_proxy.sh (refs #127), which both
+# Makefile:start and start_proxy.sh source — so a single file bump updates all
+# execution paths.
+if grep -Fq 'cat "$LAUNCH_PROXY_ROOT/.litellm-version"' scripts/_launch_proxy.sh; then
+    pass "scripts/_launch_proxy.sh reads .litellm-version"
 else
-    fail "Makefile does not read .litellm-version"
+    fail "scripts/_launch_proxy.sh does not read .litellm-version"
 fi
 
-# ── Test 4: start_proxy.sh reads from .litellm-version ────────
-echo "Test 4: start_proxy.sh reads version from .litellm-version"
-if grep -Fq 'cat "$SCRIPT_DIR/.litellm-version"' start_proxy.sh; then
-    pass "start_proxy.sh reads .litellm-version"
+# ── Test 4: both entry points delegate to the shared launch fn ─
+echo "Test 4: Makefile and start_proxy.sh delegate to the shared launch function"
+if grep -Fq 'source scripts/_launch_proxy.sh' Makefile \
+   && grep -Fq 'source "$SCRIPT_DIR/scripts/_launch_proxy.sh"' start_proxy.sh; then
+    pass "Makefile and start_proxy.sh source the shared launch function"
 else
-    fail "start_proxy.sh does not read .litellm-version"
+    fail "Makefile and/or start_proxy.sh do not source the shared launch function"
 fi
 
 # ── Test 5: No hardcoded litellm[proxy]==<version> diverges ───
@@ -72,7 +76,7 @@ if [ -n "$VERSION" ]; then
     # pinned version that is a prefix of another (e.g. 1.89.1 vs 1.89.10) is
     # still flagged as drift.
     drift=$(grep -RhoE 'litellm\[proxy\]==[0-9]+\.[0-9]+\.[0-9]+' \
-        Dockerfile Makefile start_proxy.sh 2>/dev/null \
+        Dockerfile Makefile start_proxy.sh scripts/_launch_proxy.sh 2>/dev/null \
         | grep -Fxv "litellm[proxy]==${VERSION}" || true)
     if [ -n "$drift" ]; then
         fail "Hardcoded litellm version(s) diverge from .litellm-version: $drift"

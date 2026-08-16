@@ -25,6 +25,8 @@ import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
+from proxy_endpoint import _read_env_port as _read_env_port_shared
+
 # Loopback hosts that mean "the proxy runs on this machine".
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 DEFAULT_PORT = "4000"
@@ -104,20 +106,11 @@ def probe_health(url, timeout=3):
 def read_fallback_port(env_path=".env", default=DEFAULT_PORT):
     """Read ``LITELLM_PORT`` from a .env file, defaulting when absent/unreadable.
 
-    Tolerates a non-UTF-8 .env (a status report must never fail) and matches only
-    the exact ``LITELLM_PORT`` assignment, not lookalikes like ``LITELLM_PORTAL``.
+    Delegates to the canonical resolver in proxy_endpoint.py (refs #110, #128)
+    so the .env port-parsing logic lives in exactly one place. Tolerates a
+    non-UTF-8 .env and matches only the exact ``LITELLM_PORT`` assignment.
     """
-    try:
-        lines = Path(env_path).read_text().splitlines()
-    except (OSError, UnicodeError):
-        return default
-    for line in lines:
-        key, sep, value = line.strip().partition("=")
-        if sep and key.strip() == "LITELLM_PORT":
-            value = value.strip().strip('"').strip("'")
-            if value:
-                return value
-    return default
+    return _read_env_port_shared(env_path, default=default)
 
 
 def render_status(settings, fallback_port=DEFAULT_PORT, probe=probe_health):

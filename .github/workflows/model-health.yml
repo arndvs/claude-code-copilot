@@ -104,31 +104,23 @@ jobs:
 
       - name: Open or update the model-health issue
         if: steps.probe.outputs.status == 'fail'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BROKEN: ${{ steps.probe.outputs.broken }}
-          DEGRADED: ${{ steps.probe.outputs.degraded }}
-        run: |
-          title="⚠️ Model health: configured alias(es) failing through the proxy"
-          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label model-health \
-            --json number --jq '.[0].number // empty' 2>/dev/null || true)
-          body=$(printf '%s\n' \
-            "These \`litellm_config.yaml\` aliases failed a completion through the proxy at $(date -u +%FT%TZ):" \
-            "" \
-            "**Failing (hard):**${BROKEN}" \
-            "" \
-            "${DEGRADED:+**Degraded (empty, not paging):**${DEGRADED}}" \
-            "" \
-            "Usually means the upstream provider changed model availability (the same 'no choices' class that forced the sonnet -> opus-4.8 remap). Update the alias targets in \`litellm_config.yaml\`." \
-            "" \
-            "Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}")
-          if [ -n "$existing" ]; then
-            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
-          else
-            gh label create model-health --repo "$GITHUB_REPOSITORY" --color FBCA04 \
-              --description "Proxy model availability" 2>/dev/null || true
-            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --label model-health --body "$body"
-          fi
+        uses: ./.github/actions/upsert-issue
+        with:
+          token: ${{ github.token }}
+          label: model-health
+          label-color: FBCA04
+          label-description: Proxy model availability
+          title: "⚠️ Model health: configured alias(es) failing through the proxy"
+          body: |
+            These `litellm_config.yaml` aliases failed a completion through the proxy at __TIMESTAMP__:
+
+            **Failing (hard):**${{ steps.probe.outputs.broken }}
+
+            ${{ steps.probe.outputs.degraded && format('**Degraded (empty, not paging):**{0}', steps.probe.outputs.degraded) || '' }}
+
+            Usually means the upstream provider changed model availability (the same 'no choices' class that forced the sonnet -> opus-4.8 remap). Update the alias targets in `litellm_config.yaml`.
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
       - name: Mark the job failed
         if: steps.probe.outputs.status == 'fail'
