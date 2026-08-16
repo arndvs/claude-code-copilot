@@ -113,9 +113,9 @@ The instance role can then read it back; the on-disk `.env` stays `chmod 600`.
 
 ## 4. Authenticate Copilot once, on the host
 
-The proxy is dual-provider: **GitHub Copilot is the primary upstream**, so its OAuth token must be obtained once on the host and mounted into the container. The OpenRouter fallback needs only the API key in `.env`.
+The proxy is dual-provider: **OpenRouter is the primary upstream**, so it needs only the API key in `.env`. **GitHub Copilot is the automatic fallback**, so its OAuth token must be obtained once on the host and mounted into the container.
 
-**Copilot OAuth (primary).** The device-code flow needs a browser and writes a token cache the container later mounts:
+**Copilot OAuth (fallback).** The device-code flow needs a browser and writes a token cache the container later mounts:
 
 ```bash
 set -a && . ./.env && set +a
