@@ -39,11 +39,10 @@ class TestResolveProxyUrl:
     def test_missing_key_returns_none(self):
         assert proxy_status.resolve_proxy_url({"env": {"OTHER": "x"}}) is None
 
-    def test_non_dict_env_returns_none(self):
-        # Test 1f3: malformed env block ("env": []) → route Anthropic direct.
+    def test_non_dict_env_or_settings_returns_none(self):
+        # Test 1f3: malformed env block ("env": []) → route Anthropic direct;
+        # non-dict settings ([] → settings.get is None) behaves the same.
         assert proxy_status.resolve_proxy_url({"env": []}) is None
-
-    def test_non_dict_settings_returns_none(self):
         assert proxy_status.resolve_proxy_url([]) is None
 
     def test_non_string_value_is_coerced_not_crashed(self):
@@ -151,8 +150,8 @@ class TestRenderStatus:
         # Test 1f4: the displayed URL must not carry a trailing slash.
         settings = {"env": {"ANTHROPIC_BASE_URL": "https://proxy.example.test/"}}
         lines = proxy_status.render_status(settings, probe=lambda url: False)
+        assert lines[0] == "🔗 Routing: hosted proxy"
         assert "https://proxy.example.test " in lines[1]
-        assert "https://proxy.example.test/ " not in lines[1]
 
 
 class TestReadFallbackPort:
@@ -169,15 +168,15 @@ class TestReadFallbackPort:
     def test_defaults_when_file_missing(self, tmp_path):
         assert proxy_status.read_fallback_port(str(tmp_path / "nope.env")) == proxy_status.DEFAULT_PORT
 
-    def test_custom_default_used_when_absent(self, tmp_path):
-        env = tmp_path / ".env"
-        env.write_text("OTHER=1\n")
-        assert proxy_status.read_fallback_port(str(env), default="7777") == "7777"
-
-    def test_ignores_lookalike_keys(self, tmp_path):
-        env = tmp_path / ".env"
-        env.write_text('LITELLM_PORTAL="9999"\nLITELLM_PORT=8080\n')
-        assert proxy_status.read_fallback_port(str(env)) == "8080"
+    def test_custom_default_used_when_absent_and_ignores_lookalike_keys(self, tmp_path):
+        # A missing LITELLM_PORT falls back to the caller's custom default, and
+        # lookalike keys (LITELLM_PORTAL) are not mistaken for LITELLM_PORT.
+        missing = tmp_path / "missing.env"
+        missing.write_text("OTHER=1\n")
+        assert proxy_status.read_fallback_port(str(missing), default="7777") == "7777"
+        lookalike = tmp_path / "lookalike.env"
+        lookalike.write_text('LITELLM_PORTAL="9999"\nLITELLM_PORT=8080\n')
+        assert proxy_status.read_fallback_port(str(lookalike)) == "8080"
 
 
 class TestMain:

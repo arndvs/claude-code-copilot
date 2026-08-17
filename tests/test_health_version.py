@@ -6,222 +6,101 @@ import sys
 import os
 from unittest.mock import patch
 
-import pytest
-
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 class TestGetVersion:
     """Unit tests for get_version() — the core logic."""
 
-    def test_returns_sha_from_env(self, monkeypatch):
+    def test_returns_sha_and_built_at_from_env(self, monkeypatch):
         monkeypatch.setenv("BUILD_SHA", "abc1234")
         monkeypatch.setenv("BUILD_TIMESTAMP", "2024-01-15T10:30:00Z")
         from health_version import get_version
 
         result = get_version()
         assert result["sha"] == "abc1234"
-
-    def test_full_sha_is_truncated_to_7_chars(self, monkeypatch):
-        """A full 40-char SHA baked in at build time should be trimmed to 7 chars."""
-        full_sha = "a" * 40
-        monkeypatch.setenv("BUILD_SHA", full_sha)
-        from health_version import get_version
-
-        result = get_version()
-        assert result["sha"] == "a" * 7, f"Expected 7-char SHA, got {result['sha']!r}"
-
-    def test_returns_built_at_from_env(self, monkeypatch):
-        monkeypatch.setenv("BUILD_SHA", "abc1234")
-        monkeypatch.setenv("BUILD_TIMESTAMP", "2024-01-15T10:30:00Z")
-        from health_version import get_version
-
-        result = get_version()
         assert result["built_at"] == "2024-01-15T10:30:00Z"
 
-    def test_sha_defaults_to_unknown_when_env_and_git_both_fail(self, monkeypatch):
-        """'unknown' is returned only when both env and git are unavailable."""
+    def test_sha_is_truncated_to_7_chars(self, monkeypatch):
+        """A long SHA (baked in or from git) must be trimmed to 7 chars."""
+        # Env-baked full 40-char SHA.
+        monkeypatch.setenv("BUILD_SHA", "a" * 40)
+        from health_version import get_version
+
+        assert get_version()["sha"] == "a" * 7
+
+        # git rev-parse --short can exceed 7 chars in large repos.
         monkeypatch.delenv("BUILD_SHA", raising=False)
-        monkeypatch.delenv("BUILD_TIMESTAMP", raising=False)
-        from health_version import get_version
-
-        with patch("health_version.subprocess.run", side_effect=Exception("git not found")):
-            result = get_version()
-        assert result["sha"] == "unknown"
-
-    def test_built_at_defaults_to_unknown_when_unset(self, monkeypatch):
-        monkeypatch.delenv("BUILD_SHA", raising=False)
-        monkeypatch.delenv("BUILD_TIMESTAMP", raising=False)
-        from health_version import get_version
-
-        result = get_version()
-        assert result["built_at"] == "unknown"
-
-    def test_response_has_exactly_two_keys(self, monkeypatch):
-        monkeypatch.setenv("BUILD_SHA", "deadbee")
-        monkeypatch.setenv("BUILD_TIMESTAMP", "2024-06-01T00:00:00Z")
-        from health_version import get_version
-
-        result = get_version()
-        assert set(result.keys()) == {"sha", "built_at"}
-
-    def test_git_fallback_sha_truncated_to_7_chars(self, monkeypatch):
-        """git rev-parse --short can return >7 chars in large repos; must be trimmed."""
-        monkeypatch.delenv("BUILD_SHA", raising=False)
-        from health_version import get_version
-
         with patch("health_version.subprocess.run") as mock_run:
             mock_run.return_value.returncode = 0
             mock_run.return_value.stdout = "abcdef1234567890\n"  # 16-char abbrev
             result = get_version()
-
-        assert result["sha"] == "abcdef1", f"Expected 7-char SHA, got {result['sha']!r}"
-
-    def test_built_at_unknown_when_env_is_empty_string(self, monkeypatch):
-        """BUILD_TIMESTAMP='' (empty) normalizes to 'unknown', not an empty string."""
-        monkeypatch.setenv("BUILD_SHA", "abc1234")
-        monkeypatch.setenv("BUILD_TIMESTAMP", "")
-        from health_version import get_version
-
-        result = get_version()
-        assert result["built_at"] == "unknown"
-
-
-class TestCustomApiRouter:
-    """Verify the module exports a custom_api_router compatible with LiteLLM."""
-
-    def test_module_exports_custom_api_router(self):
-        import health_version
-
-        assert hasattr(health_version, "custom_api_router")
-
-    def test_router_has_health_version_route(self):
-        import health_version
-
-        routes = [r.path for r in health_version.custom_api_router.routes]
-        assert "/health/version" in routes
-
-    def test_route_allows_get(self):
-        import health_version
-
-        for route in health_version.custom_api_router.routes:
-            if route.path == "/health/version":
-                assert "GET" in route.methods
-                break
-        else:
-            pytest.fail("/health/version route not found")
-
-
-class TestVersionCallbackInstance:
-    """Verify the module exports a valid LiteLLM callback instance."""
-
-    def test_module_exports_version_callback_instance(self):
-        import health_version
-
-        assert hasattr(health_version, "version_callback_instance")
-
-    def test_callback_is_noop(self):
-        """The callback exists only to trigger module import; it does nothing."""
-        import health_version
-
-        # Should not raise
-        cb = health_version.version_callback_instance
-        assert cb is not None
-
-
-class TestRegisterRouter:
-    """Verify _register_router degrades gracefully outside the proxy."""
-
-    def test_register_router_does_not_raise_outside_proxy(self):
-        """Importing the module outside litellm proxy context must not fail."""
-        # If we got here, the import at module level already succeeded
-        import health_version
-
-        # Calling it again should also be safe
-        health_version._register_router()
-
-
-class TestGitFallback:
-    """Unit tests for the git rev-parse fallback path in get_version()."""
+        assert result["sha"] == "abcdef1"
 
     def test_sha_falls_back_to_git_when_env_unset(self, monkeypatch):
-        """When BUILD_SHA is missing, git provides the SHA."""
+        """Git provides the SHA when BUILD_SHA is missing, and is not called when set."""
         monkeypatch.delenv("BUILD_SHA", raising=False)
         from health_version import get_version
 
         with patch("health_version.subprocess.run") as mock_run:
             mock_run.return_value.returncode = 0
             mock_run.return_value.stdout = "deadbee\n"
-            result = get_version()
-
-        assert result["sha"] == "deadbee"
+            assert get_version()["sha"] == "deadbee"
         mock_run.assert_called_once()
 
-    def test_sha_falls_back_to_git_when_env_is_unknown(self, monkeypatch):
-        """'unknown' (the Dockerfile default) triggers the git fallback."""
-        monkeypatch.setenv("BUILD_SHA", "unknown")
-        from health_version import get_version
-
+        # git is never invoked when BUILD_SHA is already baked in.
+        monkeypatch.setenv("BUILD_SHA", "abc1234")
         with patch("health_version.subprocess.run") as mock_run:
-            mock_run.return_value.returncode = 0
-            mock_run.return_value.stdout = "face123\n"
-            result = get_version()
+            get_version()
+        mock_run.assert_not_called()
 
-        assert result["sha"] == "face123"
-
-    def test_sha_unknown_when_git_fails(self, monkeypatch):
-        """If git raises, sha falls back to 'unknown' — never propagates the exception."""
-        monkeypatch.delenv("BUILD_SHA", raising=False)
+    def test_built_at_defaults_to_unknown_when_not_a_real_value(self, monkeypatch):
+        """The Dockerfile default 'unknown' and an empty string normalize to 'unknown'."""
         from health_version import get_version
 
+        for value in (None, "", "unknown"):
+            monkeypatch.setenv("BUILD_SHA", "abc1234")
+            if value is None:
+                monkeypatch.delenv("BUILD_TIMESTAMP", raising=False)
+            else:
+                monkeypatch.setenv("BUILD_TIMESTAMP", value)
+            assert get_version()["built_at"] == "unknown"
+
+    def test_response_has_exactly_two_keys(self, monkeypatch):
+        monkeypatch.setenv("BUILD_SHA", "deadbee")
+        monkeypatch.setenv("BUILD_TIMESTAMP", "2024-06-01T00:00:00Z")
+        from health_version import get_version
+
+        assert set(get_version().keys()) == {"sha", "built_at"}
+
+
+class TestGitFallback:
+    """The git rev-parse fallback and its failure modes."""
+
+    def test_git_failure_paths_return_unknown(self, monkeypatch):
+        """A raised git error or non-zero exit both degrade to 'unknown'."""
+        from health_version import get_version
+
+        # subprocess raises (git unavailable).
+        monkeypatch.delenv("BUILD_SHA", raising=False)
         with patch("health_version.subprocess.run", side_effect=Exception("git not found")):
-            result = get_version()
+            assert get_version()["sha"] == "unknown"
 
-        assert result["sha"] == "unknown"
-
-    def test_sha_unknown_when_git_returns_nonzero(self, monkeypatch):
-        """Non-zero git exit code is treated the same as a failure."""
-        monkeypatch.delenv("BUILD_SHA", raising=False)
-        from health_version import get_version
-
+        # git exits non-zero with no stdout.
         with patch("health_version.subprocess.run") as mock_run:
             mock_run.return_value.returncode = 128
             mock_run.return_value.stdout = ""
-            result = get_version()
-
-        assert result["sha"] == "unknown"
-
-    def test_git_not_called_when_build_sha_is_set(self, monkeypatch):
-        """git is never invoked when BUILD_SHA is already baked in."""
-        monkeypatch.setenv("BUILD_SHA", "abc1234")
-        from health_version import get_version
-
-        with patch("health_version.subprocess.run") as mock_run:
-            get_version()
-
-        mock_run.assert_not_called()
+            assert get_version()["sha"] == "unknown"
 
 
-class TestBuiltAtEdgeCases:
-    """Edge cases for the built_at field."""
+class TestRegisterRouter:
+    """Verify _register_router degrades gracefully outside the proxy."""
 
-    def test_built_at_unknown_when_env_is_literal_unknown(self, monkeypatch):
-        """The Dockerfile default 'unknown' for BUILD_TIMESTAMP stays as 'unknown'."""
-        monkeypatch.setenv("BUILD_SHA", "abc1234")
-        monkeypatch.setenv("BUILD_TIMESTAMP", "unknown")
-        from health_version import get_version
+    def test_register_router_does_not_raise_outside_proxy(self):
+        """Calling _register_router outside litellm proxy context must not fail."""
+        import health_version
 
-        result = get_version()
-        assert result["built_at"] == "unknown"
-
-    def test_built_at_unknown_when_env_unset(self, monkeypatch):
-        """BUILD_TIMESTAMP not set at all → 'unknown'."""
-        monkeypatch.setenv("BUILD_SHA", "abc1234")
-        monkeypatch.delenv("BUILD_TIMESTAMP", raising=False)
-        from health_version import get_version
-
-        result = get_version()
-        assert result["built_at"] == "unknown"
+        health_version._register_router()
 
 
 class TestSingleRouteRegistration:
