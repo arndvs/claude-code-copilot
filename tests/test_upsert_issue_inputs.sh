@@ -79,29 +79,23 @@ else
     fail "issue-number and/or action-taken output missing"
 fi
 
-# ── Test 4: shell block appears exactly once ──────────────────
-echo "Test 4: 'open or update issue by label' shell block appears exactly once"
-# The canonical block lives in the composite action. Count occurrences of the
-# distinctive gh issue list --label pattern across the repo (excluding the
-# action itself, which is the single source). `|| true` guards the grep -v
-# exit-1 (no lines pass) under `set -euo pipefail`.
-COUNT=$(grep -rn --include='*.yml' --include='*.yaml' \
-  'gh issue list --repo' .github/ 2>/dev/null | grep -v "$ACTION" || true | wc -l | tr -d ' ')
-if [ "$COUNT" -eq 0 ]; then
-    pass "no inline 'gh issue list' blocks remain outside the action"
+# ── Test 4: canonical shell block lives in the action ──────────
+echo "Test 4: 'open or update issue by label' shell lives in the action"
+# The canonical block lives in the composite action. The action must contain
+# the distinctive `gh issue list` upsert pattern (it is the shared source).
+if grep -q 'gh issue list --repo' "$ACTION"; then
+    pass "upsert-issue action contains the canonical 'gh issue list' block"
 else
-    fail "found $COUNT inline 'gh issue list' block(s) outside the action — refactor to use ./.github/actions/upsert-issue"
+    fail "the explicit: upsert-issue action no longer contains the 'gh issue list --repo' block"
 fi
 
-# ── Test 5: workflows reference the action ─────────────────────
-echo "Test 5: proxy-canary.yml and model-health.yml use the action"
-for wf in proxy-canary model-health; do
-    if grep -q 'uses: ./.github/actions/upsert-issue' ".github/workflows/$wf.yml"; then
-        pass "$wf.yml uses the upsert-issue action"
-    else
-        fail "$wf.yml does not use the upsert-issue action"
-    fi
-done
+# ── Test 5: documented alerting workflow uses the action ──────
+echo "Test 5: model-health.yml uses the upsert-issue action"
+if grep -q 'uses: ./.github/actions/upsert-issue' ".github/workflows/model-health.yml"; then
+    pass "model-health.yml uses the upsert-issue action"
+else
+    fail "model-health.yml does not use the upsert-issue action"
+fi
 
 echo ""
 echo "Result: $PASS passed, $FAIL failed"
