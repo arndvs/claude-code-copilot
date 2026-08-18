@@ -24,11 +24,23 @@ jobs:
 
     steps:
       - name: Checkout workflow actions
-        uses: actions/checkout@v4
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           ref: dev
 
+      - name: Check workflow enabled (disabledWorkflows)
+        id: workflow-enabled
+        run: |
+          set -euo pipefail
+          out="$(bash .sandcastle/scripts/check-workflow-enabled.sh keep-tests-tight)"
+          if [[ "$out" == "enabled=true" ]]; then
+            echo "workflow-enabled=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "workflow-enabled=no" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Proxy preflight
+        if: steps.workflow-enabled.outputs.workflow-enabled == 'yes'
         id: proxy-preflight
         env:
           ANTHROPIC_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}

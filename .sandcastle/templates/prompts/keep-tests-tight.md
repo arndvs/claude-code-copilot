@@ -6,6 +6,14 @@ This is an unattended CI run. There is no user to interview. Your job is to edit
 
 - **Branch:** `{{BRANCH}}`
 
+# OUT OF SCOPE — VENDORED/PRODUCER-OWNED PATHS
+
+The following paths are **vendored or producer-owned** and are never edited from this repo:
+
+- {{OUT_OF_SCOPE_PATHS}}
+
+Do **NOT** modify, combine, or delete any test or file under these paths. They are re-vendored on every build; local changes would be overwritten upstream and create drift.
+
 # TESTING PRINCIPLES
 
 Read the repo's testing principles from `{{TESTING_PRINCIPLES}}` if the file exists, and apply them strictly.

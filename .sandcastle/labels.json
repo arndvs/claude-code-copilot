@@ -73,5 +73,40 @@
     "name": "hitl",
     "color": "d4c5f9",
     "description": "Human-in-the-loop — requires human review or decision"
+  },
+  {
+    "name": "repo-hygiene",
+    "color": "7057ff",
+    "description": "Backlog issues proposed by the nightly repo-hygiene workflow"
+  },
+  {
+    "name": "phase-0",
+    "color": "c5def5",
+    "description": "Repo-hygiene phase 0 — safety net"
+  },
+  {
+    "name": "phase-1",
+    "color": "c5def5",
+    "description": "Repo-hygiene phase 1 — structure/layout"
+  },
+  {
+    "name": "phase-2",
+    "color": "c5def5",
+    "description": "Repo-hygiene phase 2 — DRY extraction"
+  },
+  {
+    "name": "phase-3",
+    "color": "c5def5",
+    "description": "Repo-hygiene phase 3 — styling/typing"
+  },
+  {
+    "name": "phase-4",
+    "color": "c5def5",
+    "description": "Repo-hygiene phase 4 — content/data"
+  },
+  {
+    "name": "phase-5",
+    "color": "c5def5",
+    "description": "Repo-hygiene phase 5 — ratchet"
   }
 ]

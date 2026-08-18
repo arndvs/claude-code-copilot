@@ -108,6 +108,48 @@ export const LABELS: Record<string, LabelDef> = {
     description: "Human-in-the-loop — requires human review or decision",
     stateMarker: true,
   },
+  "repo-hygiene": {
+    appliesTo: ["issue"],
+    color: "7057ff",
+    description: "Backlog issues proposed by the nightly repo-hygiene workflow",
+    stateMarker: true,
+  },
+  "phase-0": {
+    appliesTo: ["issue"],
+    color: "c5def5",
+    description: "Repo-hygiene phase 0 — safety net",
+    stateMarker: true,
+  },
+  "phase-1": {
+    appliesTo: ["issue"],
+    color: "c5def5",
+    description: "Repo-hygiene phase 1 — structure/layout",
+    stateMarker: true,
+  },
+  "phase-2": {
+    appliesTo: ["issue"],
+    color: "c5def5",
+    description: "Repo-hygiene phase 2 — DRY extraction",
+    stateMarker: true,
+  },
+  "phase-3": {
+    appliesTo: ["issue"],
+    color: "c5def5",
+    description: "Repo-hygiene phase 3 — styling/typing",
+    stateMarker: true,
+  },
+  "phase-4": {
+    appliesTo: ["issue"],
+    color: "c5def5",
+    description: "Repo-hygiene phase 4 — content/data",
+    stateMarker: true,
+  },
+  "phase-5": {
+    appliesTo: ["issue"],
+    color: "c5def5",
+    description: "Repo-hygiene phase 5 — ratchet",
+    stateMarker: true,
+  },
 };
 
 // ── Mutual exclusions ────────────────────────────────────────────────────────

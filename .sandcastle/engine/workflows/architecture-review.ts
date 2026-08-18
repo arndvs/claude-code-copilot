@@ -8,6 +8,7 @@ import { ArchitectureReviewOutput } from "../schemas/architecture-review-output.
 import { loadConfig } from "../lib/config.js";
 import { resolvePrompt, configPromptArgs, filterPromptArgs } from "../lib/resolve-prompt.js";
 import { resolveDefaultExtractionsDir, resolveDefaultTemplatesDir } from "../lib/default-template-paths.js";
+import { isProposalOutOfScope } from "../lib/scope.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const defaultTemplatesDir = resolveDefaultTemplatesDir({ workflowDir: __dirname });
@@ -40,6 +41,15 @@ export async function runArchitectureReview(opts: {
     extractionPrompt,
     logging: { type: "stdout" },
   });
+
+  // Backstop: never propose changes to vendored/producer-owned paths even if
+  // the model ignored the prompt's OUT_OF_SCOPE_PATHS section.
+  if (result.output.status === "proposed" && isProposalOutOfScope(result.output, config)) {
+    console.warn(
+      "[architecture-review] Proposal references an out-of-scope (vendored/producer-owned) path — refusing to publish.",
+    );
+    return { status: "skipped", reason: "proposal targets an out-of-scope path" };
+  }
 
   if (result.output.status === "proposed") {
     console.log(`[architecture-review] Proposed PRD: ${result.output.title}`);

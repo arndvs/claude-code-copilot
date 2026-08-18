@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { access } from "node:fs/promises";
 import { join, isAbsolute } from "node:path";
-import type { SandcastleConfig } from "./config.js";
+import { resolveExcludedPaths, type SandcastleConfig } from "./config.js";
 
 interface ResolvePromptOpts {
   name: string;
@@ -57,6 +57,7 @@ export function configPromptArgs(config: SandcastleConfig): Record<string, strin
     TESTING_PRINCIPLES: config.testingPrinciples,
     ADR_DIR: config.adrDir,
     BASE_BRANCH: config.baseBranch,
+    OUT_OF_SCOPE_PATHS: resolveExcludedPaths(config).join(", "),
   };
 }
 

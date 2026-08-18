@@ -13,6 +13,14 @@ This is an unattended CI run. There is no user to interview and no HTML report t
 
 The workflow will create the GitHub issue and apply the `source:architecture-review` label. Do not create the issue yourself.
 
+# OUT OF SCOPE — VENDORED/PRODUCER-OWNED CODE
+
+The following paths are **vendored or producer-owned** and are managed exclusively in the property's source repo. Do **NOT** propose, plan, or reference changes to anything under them:
+
+- {{OUT_OF_SCOPE_PATHS}}
+
+These files are re-vendored on every sync; proposals to change them here would diverge from the single source of truth and be overwritten. Focus candidates exclusively on the repo's own application code.
+
 # REVIEW METHOD
 
 Look for architectural deepening opportunities rather than cosmetic cleanup:
