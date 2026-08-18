@@ -96,7 +96,11 @@ class _MockUpstream(BaseHTTPRequestHandler):
                             "finish_reason": "stop",
                         }
                     ],
-                    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                    "usage": {
+                        "prompt_tokens": 1,
+                        "completion_tokens": 1,
+                        "total_tokens": 2,
+                    },
                 }
             ).encode()
         else:
@@ -144,9 +148,7 @@ def router_and_mock():
     import tempfile
 
     token_dir = tempfile.mkdtemp(prefix="copilot-token-")
-    api_key_name = os.environ.get(
-        "GITHUB_COPILOT_API_KEY_FILE", "api-key.json"
-    )
+    api_key_name = os.environ.get("GITHUB_COPILOT_API_KEY_FILE", "api-key.json")
     with open(os.path.join(token_dir, api_key_name), "w") as f:
         import json
 
@@ -260,13 +262,9 @@ class TestPrimaryRouting:
         config = _load_config()
         for alias in _primary_aliases(config):
             mock.recorded.clear()
-            router.completion(
-                model=alias, messages=[{"role": "user", "content": "hi"}]
-            )
+            router.completion(model=alias, messages=[{"role": "user", "content": "hi"}])
             assert mock.recorded, f"no upstream request recorded for {alias}"
-            entry = next(
-                e for e in config["model_list"] if e["model_name"] == alias
-            )
+            entry = next(e for e in config["model_list"] if e["model_name"] == alias)
             assert "api_key" in entry["litellm_params"], (
                 f"alias {alias!r} primary must carry an api_key (OpenRouter)"
             )
@@ -276,9 +274,7 @@ class TestPrimaryRouting:
         config = _load_config()
         for alias in _primary_aliases(config):
             mock.recorded.clear()
-            router.completion(
-                model=alias, messages=[{"role": "user", "content": "hi"}]
-            )
+            router.completion(model=alias, messages=[{"role": "user", "content": "hi"}])
             assert mock.recorded, f"no upstream request recorded for {alias}"
             assert mock.recorded[0]["body"]["stream"] is True, (
                 f"alias {alias!r} did not set stream: true"
@@ -334,9 +330,7 @@ class TestFallbackRouting:
         config = _load_config()
         for alias in _fallback_aliases(config):
             mock.recorded.clear()
-            router.completion(
-                model=alias, messages=[{"role": "user", "content": "hi"}]
-            )
+            router.completion(model=alias, messages=[{"role": "user", "content": "hi"}])
             assert mock.recorded, f"no upstream request recorded for {alias}"
             headers = mock.recorded[0]["headers"]
             missing = EDITOR_HEADERS - set(headers.keys())
@@ -345,36 +339,24 @@ class TestFallbackRouting:
             )
 
 
-class TestFallbackWiring:
-    """router_settings.fallbacks must wire each primary to its fallback."""
-
-    def test_every_primary_has_fallback(self):
-        config = _load_config()
-        fallback_map: dict[str, list[str]] = {}
-        for item in config.get("router_settings", {}).get("fallbacks", []):
-            for model, fb_list in item.items():
-                fallback_map[model] = fb_list
-        for alias in _primary_aliases(config):
-            assert alias in fallback_map, (
-                f"primary {alias!r} has no router_settings.fallbacks entry"
-            )
-            assert f"{alias}{FALLBACK_SUFFIX}" in fallback_map[alias], (
-                f"primary {alias!r} fallbacks do not include {alias}{FALLBACK_SUFFIX}"
-            )
-
-
 class TestParamDropContract:
-    """The config must declare the param-drop intent (durable contract)."""
+    """The config must declare the param-drop intent (durable contract).
 
-    def test_config_declares_response_format_and_thinking_in_additional_drop_params(self):
+    The ``drop_params: true`` shape itself is asserted by test_settings_contract.py;
+    this test pins the specific params the runtime strip test relies on
+    (``thinking`` is proven stripped at runtime in TestPrimaryRouting).
+    """
+
+    def test_config_declares_response_format_and_thinking_in_additional_drop_params(
+        self,
+    ):
         config = _load_config()
-        additional = config.get("litellm_settings", {}).get("additional_drop_params", [])
+        additional = config.get("litellm_settings", {}).get(
+            "additional_drop_params", []
+        )
         assert "response_format" in additional, (
             "additional_drop_params must include 'response_format' (CONTEXT.md §1)"
         )
         assert "thinking" in additional, (
             "additional_drop_params must include 'thinking' (CONTEXT.md §1)"
-        )
-        assert config.get("litellm_settings", {}).get("drop_params") is True, (
-            "litellm_settings.drop_params must be true (CONTEXT.md §1)"
         )

@@ -14,13 +14,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 class TestGetVersion:
     """Unit tests for get_version() — the core logic."""
 
-    def test_returns_sha_from_env(self, monkeypatch):
+    def test_returns_sha_and_built_at_with_exactly_two_keys(self, monkeypatch):
         monkeypatch.setenv("BUILD_SHA", "abc1234")
         monkeypatch.setenv("BUILD_TIMESTAMP", "2024-01-15T10:30:00Z")
         from health_version import get_version
 
         result = get_version()
+        assert set(result.keys()) == {"sha", "built_at"}
         assert result["sha"] == "abc1234"
+        assert result["built_at"] == "2024-01-15T10:30:00Z"
 
     def test_full_sha_is_truncated_to_7_chars(self, monkeypatch):
         """A full 40-char SHA baked in at build time should be trimmed to 7 chars."""
@@ -32,6 +34,7 @@ class TestGetVersion:
         assert result["sha"] == "a" * 7, f"Expected 7-char SHA, got {result['sha']!r}"
 
     def test_returns_built_at_from_env(self, monkeypatch):
+        """BUILD_TIMESTAMP is passed through verbatim when set."""
         monkeypatch.setenv("BUILD_SHA", "abc1234")
         monkeypatch.setenv("BUILD_TIMESTAMP", "2024-01-15T10:30:00Z")
         from health_version import get_version
@@ -45,7 +48,9 @@ class TestGetVersion:
         monkeypatch.delenv("BUILD_TIMESTAMP", raising=False)
         from health_version import get_version
 
-        with patch("health_version.subprocess.run", side_effect=Exception("git not found")):
+        with patch(
+            "health_version.subprocess.run", side_effect=Exception("git not found")
+        ):
             result = get_version()
         assert result["sha"] == "unknown"
 
@@ -87,19 +92,20 @@ class TestGetVersion:
         assert result["built_at"] == "unknown"
 
 
-class TestCustomApiRouter:
-    """Verify the module exports a custom_api_router compatible with LiteLLM."""
+class TestModuleExports:
+    """Verify the module exports the LiteLLM-facing wiring after import."""
 
-    def test_module_exports_custom_api_router(self):
+    def test_module_exports_router_callback_and_registers_safely(self):
         import health_version
 
-        assert hasattr(health_version, "custom_api_router")
-
-    def test_router_has_health_version_route(self):
-        import health_version
-
+        # Import outside the proxy must already have registered the route once
+        # (custom_api_router populated) and must expose a usable callback.
         routes = [r.path for r in health_version.custom_api_router.routes]
         assert "/health/version" in routes
+        assert health_version.version_callback_instance is not None
+        # Re-registering outside the proxy must not raise or duplicate the route.
+        health_version._register_router()
+        assert [r.path for r in health_version.custom_api_router.routes] == routes
 
     def test_route_allows_get(self):
         import health_version
@@ -110,35 +116,6 @@ class TestCustomApiRouter:
                 break
         else:
             pytest.fail("/health/version route not found")
-
-
-class TestVersionCallbackInstance:
-    """Verify the module exports a valid LiteLLM callback instance."""
-
-    def test_module_exports_version_callback_instance(self):
-        import health_version
-
-        assert hasattr(health_version, "version_callback_instance")
-
-    def test_callback_is_noop(self):
-        """The callback exists only to trigger module import; it does nothing."""
-        import health_version
-
-        # Should not raise
-        cb = health_version.version_callback_instance
-        assert cb is not None
-
-
-class TestRegisterRouter:
-    """Verify _register_router degrades gracefully outside the proxy."""
-
-    def test_register_router_does_not_raise_outside_proxy(self):
-        """Importing the module outside litellm proxy context must not fail."""
-        # If we got here, the import at module level already succeeded
-        import health_version
-
-        # Calling it again should also be safe
-        health_version._register_router()
 
 
 class TestGitFallback:
@@ -169,16 +146,6 @@ class TestGitFallback:
 
         assert result["sha"] == "face123"
 
-    def test_sha_unknown_when_git_fails(self, monkeypatch):
-        """If git raises, sha falls back to 'unknown' — never propagates the exception."""
-        monkeypatch.delenv("BUILD_SHA", raising=False)
-        from health_version import get_version
-
-        with patch("health_version.subprocess.run", side_effect=Exception("git not found")):
-            result = get_version()
-
-        assert result["sha"] == "unknown"
-
     def test_sha_unknown_when_git_returns_nonzero(self, monkeypatch):
         """Non-zero git exit code is treated the same as a failure."""
         monkeypatch.delenv("BUILD_SHA", raising=False)
@@ -205,23 +172,16 @@ class TestGitFallback:
 class TestBuiltAtEdgeCases:
     """Edge cases for the built_at field."""
 
-    def test_built_at_unknown_when_env_is_literal_unknown(self, monkeypatch):
-        """The Dockerfile default 'unknown' for BUILD_TIMESTAMP stays as 'unknown'."""
+    def test_built_at_unknown_when_env_is_literal_unknown_or_unset(self, monkeypatch):
+        """The Dockerfile default 'unknown' and a missing env both normalize to 'unknown'."""
+        from health_version import get_version
+
         monkeypatch.setenv("BUILD_SHA", "abc1234")
         monkeypatch.setenv("BUILD_TIMESTAMP", "unknown")
-        from health_version import get_version
+        assert get_version()["built_at"] == "unknown"
 
-        result = get_version()
-        assert result["built_at"] == "unknown"
-
-    def test_built_at_unknown_when_env_unset(self, monkeypatch):
-        """BUILD_TIMESTAMP not set at all → 'unknown'."""
-        monkeypatch.setenv("BUILD_SHA", "abc1234")
         monkeypatch.delenv("BUILD_TIMESTAMP", raising=False)
-        from health_version import get_version
-
-        result = get_version()
-        assert result["built_at"] == "unknown"
+        assert get_version()["built_at"] == "unknown"
 
 
 class TestSingleRouteRegistration:
@@ -276,11 +236,17 @@ class TestSingleRouteRegistration:
             """
             found = []
             for r in routes:
-                if isinstance(r, APIRoute) and r.path == path and "GET" in (r.methods or set()):
+                if (
+                    isinstance(r, APIRoute)
+                    and r.path == path
+                    and "GET" in (r.methods or set())
+                ):
                     found.append(r)
                 # _IncludedRouter (FastAPI 0.100+) stores the original router;
                 # recurse to find APIRoute objects nested inside it.
-                if hasattr(r, "original_router") and hasattr(r.original_router, "routes"):
+                if hasattr(r, "original_router") and hasattr(
+                    r.original_router, "routes"
+                ):
                     found.extend(_collect_get_routes(r.original_router.routes, path))
             return found
 

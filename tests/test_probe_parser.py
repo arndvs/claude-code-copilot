@@ -75,7 +75,11 @@ class TestResolveOutcome:
 
     def test_fail_on_hard_error(self):
         attempts = [
-            {"has_content": False, "is_hard_error": True, "error_detail": "auth error HTTP 401"},
+            {
+                "has_content": False,
+                "is_hard_error": True,
+                "error_detail": "auth error HTTP 401",
+            },
         ]
         r = probe_parser.resolve_outcome(attempts, retries=1)
         assert r["status"] == "fail"
@@ -89,11 +93,10 @@ class TestResolveOutcome:
         r = probe_parser.resolve_outcome(attempts, retries=2)
         assert r["status"] == "degraded"
 
-    def test_fail_when_retries_zero(self):
-        r = probe_parser.resolve_outcome([], retries=0)
-        assert r["status"] == "fail"
-        assert "no probe attempts" in r["detail"]
-
-    def test_fail_when_no_attempts_and_retries_positive(self):
-        r = probe_parser.resolve_outcome([], retries=3)
-        assert r["status"] == "fail"
+    def test_fail_when_no_attempts_any_retries(self):
+        for retries in (0, 3):
+            r = probe_parser.resolve_outcome([], retries=retries)
+            assert r["status"] == "fail"
+        assert (
+            "no probe attempts" in probe_parser.resolve_outcome([], retries=0)["detail"]
+        )

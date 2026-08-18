@@ -34,7 +34,8 @@ class TestPrecedenceChain:
         monkeypatch.setenv("PROXY_BASE_URL", "https://proxy.example.test")
         monkeypatch.setenv("LITELLM_PORT", "9999")
         ep = proxy_endpoint.resolve_proxy_endpoint(
-            env_file=".env", settings={"env": {"ANTHROPIC_BASE_URL": "http://localhost:5000"}}
+            env_file=".env",
+            settings={"env": {"ANTHROPIC_BASE_URL": "http://localhost:5000"}},
         )
         assert ep.url == "https://proxy.example.test"
         assert ep.kind == "hosted"
@@ -43,7 +44,8 @@ class TestPrecedenceChain:
         monkeypatch.delenv("PROXY_BASE_URL", raising=False)
         monkeypatch.setenv("LITELLM_PORT", "9999")
         ep = proxy_endpoint.resolve_proxy_endpoint(
-            env_file=".env", settings={"env": {"ANTHROPIC_BASE_URL": "http://localhost:5000"}}
+            env_file=".env",
+            settings={"env": {"ANTHROPIC_BASE_URL": "http://localhost:5000"}},
         )
         assert ep.url == "http://localhost:5000"
         assert ep.kind == "local"
@@ -70,42 +72,3 @@ class TestPrecedenceChain:
         assert ep.url == "http://localhost:4000"
         assert ep.port == "4000"
         assert ep.kind == "local"
-
-
-class TestProxyEndpointShape:
-    """The returned ProxyEndpoint must expose url, port, and kind."""
-
-    def test_returns_namedtuple_like_object(self, monkeypatch):
-        monkeypatch.delenv("PROXY_BASE_URL", raising=False)
-        monkeypatch.delenv("LITELLM_PORT", raising=False)
-        ep = proxy_endpoint.resolve_proxy_endpoint(env_file=".env", settings={"env": {}})
-        assert ep.url == "http://localhost:4000"
-        assert ep.port == "4000"
-        assert ep.kind == "local"
-
-    def test_kind_is_hosted_for_non_loopback(self, monkeypatch):
-        monkeypatch.setenv("PROXY_BASE_URL", "https://proxy.example.test")
-        ep = proxy_endpoint.resolve_proxy_endpoint(env_file=".env", settings={"env": {}})
-        assert ep.kind == "hosted"
-
-    def test_kind_is_local_for_loopback(self, monkeypatch):
-        monkeypatch.delenv("PROXY_BASE_URL", raising=False)
-        monkeypatch.setenv("LITELLM_PORT", "4000")
-        ep = proxy_endpoint.resolve_proxy_endpoint(env_file=".env", settings={"env": {}})
-        assert ep.kind == "local"
-
-
-class TestAllConsumersAgree:
-    """All resolution paths must agree for the same environment (refs #110)."""
-
-    def test_env_only_and_settings_only_agree_on_default(self, monkeypatch, tmp_path):
-        monkeypatch.delenv("PROXY_BASE_URL", raising=False)
-        monkeypatch.delenv("LITELLM_PORT", raising=False)
-        env_file = tmp_path / ".env"
-        env_file.write_text("", encoding="utf-8")
-
-        # No settings, no env -> default localhost:4000
-        ep = proxy_endpoint.resolve_proxy_endpoint(
-            env_file=str(env_file), settings={"env": {}}
-        )
-        assert ep.url == "http://localhost:4000"

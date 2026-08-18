@@ -22,7 +22,13 @@ from io import StringIO
 from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from litellm_logger import _duration_ms, _extract, _extract_http_info, _emit, ProxyObservabilityLogger
+from litellm_logger import (
+    _duration_ms,
+    _extract,
+    _extract_http_info,
+    _emit,
+    ProxyObservabilityLogger,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -52,57 +58,32 @@ class FakeException:
 
 
 class TestDurationMs(unittest.TestCase):
-    """Test _duration_ms with datetime objects and numeric timestamps."""
+    """Test _duration_ms converts datetime/numeric deltas to ms and degrades to None."""
 
-    def test_datetime_objects_one_second(self):
+    def test_datetime_objects(self):
         start = datetime(2024, 1, 1, 0, 0, 0)
-        end = datetime(2024, 1, 1, 0, 0, 1)
-        self.assertEqual(_duration_ms(start, end), 1000)
+        self.assertEqual(_duration_ms(start, datetime(2024, 1, 1, 0, 0, 1)), 1000)
+        self.assertEqual(_duration_ms(start, datetime(2024, 1, 1, 1, 0, 0)), 3600000)
+        self.assertEqual(_duration_ms(start, start), 0)
 
-    def test_datetime_objects_fractional_seconds(self):
+    def test_fractional_seconds_rounded(self):
         start = datetime(2024, 1, 1, 0, 0, 0, 0)
-        end = datetime(2024, 1, 1, 0, 0, 0, 500000)  # +0.5s
-        self.assertEqual(_duration_ms(start, end), 500)
-
-    def test_datetime_objects_zero_duration(self):
-        t = datetime(2024, 1, 1, 12, 0, 0)
-        self.assertEqual(_duration_ms(t, t), 0)
-
-    def test_datetime_objects_large_duration(self):
-        start = datetime(2024, 1, 1, 0, 0, 0)
-        end = datetime(2024, 1, 1, 1, 0, 0)  # 1 hour
-        self.assertEqual(_duration_ms(start, end), 3600000)
-
-    def test_numeric_timestamps_float(self):
-        # LiteLLM may pass Unix timestamps as floats; delta = end - start in seconds
-        start = 1700000000.0
-        end = 1700000002.5  # 2.5s later
-        self.assertEqual(_duration_ms(start, end), 2500)
-
-    def test_numeric_timestamps_int(self):
-        start = 1700000000
-        end = 1700000003  # 3s later
-        self.assertEqual(_duration_ms(start, end), 3000)
-
-    def test_numeric_zero_delta(self):
-        t = 1700000000.0
-        self.assertEqual(_duration_ms(t, t), 0)
-
-    def test_none_inputs_returns_none(self):
-        """When inputs are None, should return None (not raise)."""
-        self.assertIsNone(_duration_ms(None, None))
-
-    def test_mismatched_types_returns_none(self):
-        """When subtraction fails, should return None."""
-        self.assertIsNone(_duration_ms("bad", 123))
-
-    def test_timedelta_result_with_microseconds(self):
-        """Verify rounding works for microsecond-precision datetimes."""
-        start = datetime(2024, 1, 1, 0, 0, 0, 0)
-        end = datetime(2024, 1, 1, 0, 0, 0, 1500)  # 1.5ms
+        self.assertEqual(
+            _duration_ms(start, datetime(2024, 1, 1, 0, 0, 0, 500000)), 500
+        )
         # round(0.0015 * 1000) = round(1.5) = 2 (banker's rounding)
-        result = _duration_ms(start, end)
-        self.assertEqual(result, 2)
+        self.assertEqual(_duration_ms(start, datetime(2024, 1, 1, 0, 0, 0, 1500)), 2)
+
+    def test_numeric_timestamps(self):
+        # LiteLLM may pass Unix timestamps as ints or floats; delta = end - start in seconds.
+        self.assertEqual(_duration_ms(1700000000.0, 1700000002.5), 2500)
+        self.assertEqual(_duration_ms(1700000000, 1700000003), 3000)
+        self.assertEqual(_duration_ms(1700000000.0, 1700000000.0), 0)
+
+    def test_unusable_inputs_return_none(self):
+        """None, mismatched types, and non-numeric inputs return None (not raise)."""
+        self.assertIsNone(_duration_ms(None, None))
+        self.assertIsNone(_duration_ms("bad", 123))
 
 
 # ===================================================================
@@ -340,34 +321,22 @@ class TestExtractAnthropicStyle(unittest.TestCase):
 
 
 class TestExtractDefensive(unittest.TestCase):
-    """Defensive behavior: _extract never raises."""
+    """Defensive behavior: _extract never raises on unusable input."""
 
-    def test_none_response(self):
-        finish, content_len, ctoks = _extract(None)
-        self.assertIsNone(finish)
-        self.assertIsNone(content_len)
-        self.assertIsNone(ctoks)
-
-    def test_empty_dict(self):
-        finish, content_len, ctoks = _extract({})
-        self.assertIsNone(finish)
-        self.assertIsNone(content_len)
-        self.assertIsNone(ctoks)
+    def test_none_empty_dict_and_garbage_input(self):
+        for response in (None, {}, "not a response"):
+            finish, content_len, ctoks = _extract(response)
+            self.assertIsNone(finish)
+            self.assertIsNone(content_len)
+            self.assertIsNone(ctoks)
 
     def test_empty_choices_list(self):
         """Empty choices list should not crash (IndexError)."""
         response = {"choices": [], "usage": {"completion_tokens": 0}}
         finish, content_len, ctoks = _extract(response)
-        # choices is truthy? No, [] is falsy in Python. Falls through.
         self.assertIsNone(finish)
         self.assertIsNone(content_len)
         self.assertEqual(ctoks, 0)
-
-    def test_garbage_input(self):
-        finish, content_len, ctoks = _extract("not a response")
-        self.assertIsNone(finish)
-        self.assertIsNone(content_len)
-        self.assertIsNone(ctoks)
 
 
 # ===================================================================
@@ -444,24 +413,12 @@ class TestExtractHttpInfoFromException(unittest.TestCase):
 class TestExtractHttpInfoDefensive(unittest.TestCase):
     """Defensive behaviour: never raise, degrade gracefully."""
 
-    def test_empty_kwargs(self):
-        info = _extract_http_info({})
-        self.assertIsNone(info["http_status"])
-        self.assertNotIn("ratelimit", info)
-
-    def test_none_kwargs(self):
-        info = _extract_http_info(None)
-        self.assertIsNone(info["http_status"])
-
-    def test_non_dict_kwargs(self):
-        info = _extract_http_info("garbage")
-        self.assertIsNone(info["http_status"])
-
-    def test_original_response_is_string(self):
-        """original_response might be a raw string in some LiteLLM paths."""
-        kwargs = {"original_response": "some raw text"}
-        info = _extract_http_info(kwargs)
-        self.assertIsNone(info["http_status"])
+    def test_missing_or_unusable_kwargs(self):
+        """Empty/None/non-dict kwargs and a string original_response all degrade to None."""
+        for kwargs in ({}, None, "garbage", {"original_response": "some raw text"}):
+            info = _extract_http_info(kwargs)
+            self.assertIsNone(info["http_status"])
+            self.assertNotIn("ratelimit", info)
 
     def test_original_response_with_broken_headers(self):
         """If .headers raises, we still get http_status."""
@@ -516,7 +473,7 @@ def _capture_emit(kwargs, response_obj=None, status="success"):
     line = buf.getvalue().strip()
     if not line.startswith("PROXY_LOG "):
         raise AssertionError(f"Expected PROXY_LOG prefix, got: {line!r}")
-    return json.loads(line[len("PROXY_LOG "):])
+    return json.loads(line[len("PROXY_LOG ") :])
 
 
 class TestEmitHttpInfo(unittest.TestCase):
@@ -535,7 +492,9 @@ class TestEmitHttpInfo(unittest.TestCase):
         kwargs = {
             "model": "test-model",
             "call_type": "completion",
-            "original_response": FakeHttpxResponse(200, {"content-type": "application/json"}),
+            "original_response": FakeHttpxResponse(
+                200, {"content-type": "application/json"}
+            ),
         }
         rec = _capture_emit(kwargs)
         self.assertNotIn("ratelimit", rec)
@@ -698,20 +657,6 @@ class TestEmitJsonStructure(unittest.TestCase):
 class TestEmitDefensiveNoCrash(unittest.TestCase):
     """_emit must never raise, even with terrible inputs."""
 
-    def test_emit_with_none_kwargs(self):
-        """When kwargs is None, _emit should not crash."""
-        start = datetime(2024, 1, 1, 0, 0, 0)
-        end = datetime(2024, 1, 1, 0, 0, 1)
-        buf = StringIO()
-        old_stdout = sys.stdout
-        try:
-            sys.stdout = buf
-            _emit(None, None, start, end, "success")
-        finally:
-            sys.stdout = old_stdout
-        raw_line = buf.getvalue().strip()
-        assert "SECRET_CONTENT_SHOULD_NOT_APPEAR" not in raw_line
-
 
 # ===================================================================
 # _emit integration — stream field in PROXY_LOG
@@ -719,39 +664,24 @@ class TestEmitDefensiveNoCrash(unittest.TestCase):
 
 
 class TestEmitStreamField(unittest.TestCase):
-    """Verify _emit includes stream indicator from kwargs."""
+    """Verify _emit includes the stream indicator (true/false/null) from kwargs."""
 
-    def test_emit_stream_true_when_stream_in_kwargs(self):
-        """When kwargs['stream'] is True, log should record stream=True."""
-        kwargs = {
-            "model": "test-model",
-            "call_type": "completion",
-            "stream": True,
-            "original_response": FakeHttpxResponse(200),
-        }
-        rec = _capture_emit(kwargs)
-        assert rec["stream"] is True
-
-    def test_emit_stream_false_when_stream_false_in_kwargs(self):
-        """When kwargs['stream'] is False, log should record stream=False."""
-        kwargs = {
-            "model": "test-model",
-            "call_type": "completion",
-            "stream": False,
-            "original_response": FakeHttpxResponse(200),
-        }
-        rec = _capture_emit(kwargs)
-        assert rec["stream"] is False
-
-    def test_emit_stream_none_when_missing(self):
-        """When kwargs has no 'stream' key, log should record stream=None."""
+    def test_emit_records_stream_presence_and_value(self):
+        for stream, expected in zip([True, False], [True, False]):
+            kwargs = {
+                "model": "test-model",
+                "call_type": "completion",
+                "stream": stream,
+                "original_response": FakeHttpxResponse(200),
+            }
+            assert _capture_emit(kwargs)["stream"] is expected
+        # Missing stream key → null.
         kwargs = {
             "model": "test-model",
             "call_type": "completion",
             "original_response": FakeHttpxResponse(200),
         }
-        rec = _capture_emit(kwargs)
-        assert rec["stream"] is None
+        assert _capture_emit(kwargs)["stream"] is None
 
 
 # ===================================================================
@@ -784,8 +714,10 @@ class TestStreamingCallbacks(unittest.TestCase):
             sys.stdout = old_stdout
 
         line = buf.getvalue().strip()
-        assert line.startswith("PROXY_LOG "), f"Expected PROXY_LOG prefix, got: {line!r}"
-        return json.loads(line[len("PROXY_LOG "):])
+        assert line.startswith("PROXY_LOG "), (
+            f"Expected PROXY_LOG prefix, got: {line!r}"
+        )
+        return json.loads(line[len("PROXY_LOG ") :])
 
     def test_log_stream_success_event(self):
         """log_stream_event is a no-op: per-chunk hooks produce no PROXY_LOG output.
@@ -801,10 +733,17 @@ class TestStreamingCallbacks(unittest.TestCase):
         try:
             sys.stdout = buf
             logger = ProxyObservabilityLogger()
-            logger.log_stream_event(kwargs, response_obj, datetime(2024, 1, 1), datetime(2024, 1, 1, 0, 0, 1))
+            logger.log_stream_event(
+                kwargs,
+                response_obj,
+                datetime(2024, 1, 1),
+                datetime(2024, 1, 1, 0, 0, 1),
+            )
         finally:
             sys.stdout = old_stdout
-        assert buf.getvalue() == "", "log_stream_event should produce no output (no-op per-chunk hook)"
+        assert buf.getvalue() == "", (
+            "log_stream_event should produce no output (no-op per-chunk hook)"
+        )
 
     def test_async_log_stream_success_event(self):
         """async_log_stream_event is a no-op: per-chunk hooks produce no PROXY_LOG output.
@@ -820,10 +759,19 @@ class TestStreamingCallbacks(unittest.TestCase):
         try:
             sys.stdout = buf
             logger = ProxyObservabilityLogger()
-            asyncio.run(logger.async_log_stream_event(kwargs, response_obj, datetime(2024, 1, 1), datetime(2024, 1, 1, 0, 0, 1)))
+            asyncio.run(
+                logger.async_log_stream_event(
+                    kwargs,
+                    response_obj,
+                    datetime(2024, 1, 1),
+                    datetime(2024, 1, 1, 0, 0, 1),
+                )
+            )
         finally:
             sys.stdout = old_stdout
-        assert buf.getvalue() == "", "async_log_stream_event should produce no output (no-op per-chunk hook)"
+        assert buf.getvalue() == "", (
+            "async_log_stream_event should produce no output (no-op per-chunk hook)"
+        )
 
     def test_emit_with_all_none(self):
         """When everything is None, _emit should not crash."""
@@ -835,8 +783,10 @@ class TestStreamingCallbacks(unittest.TestCase):
         finally:
             sys.stdout = old_stdout
         line = buf.getvalue().strip()
-        assert line.startswith("PROXY_LOG "), f"Expected PROXY_LOG prefix, got: {line!r}"
-        rec = json.loads(line[len("PROXY_LOG "):])
+        assert line.startswith("PROXY_LOG "), (
+            f"Expected PROXY_LOG prefix, got: {line!r}"
+        )
+        rec = json.loads(line[len("PROXY_LOG ") :])
         assert rec["status"] == "failure"
         assert rec["ms"] is None
 
@@ -864,8 +814,10 @@ class TestProxyObservabilityLogger(unittest.TestCase):
             sys.stdout = old_stdout
 
         line = buf.getvalue().strip()
-        self.assertTrue(line.startswith("PROXY_LOG "), f"Expected PROXY_LOG prefix, got: {line!r}")
-        rec = json.loads(line[len("PROXY_LOG "):])
+        self.assertTrue(
+            line.startswith("PROXY_LOG "), f"Expected PROXY_LOG prefix, got: {line!r}"
+        )
+        rec = json.loads(line[len("PROXY_LOG ") :])
         self.assertEqual(rec["status"], "success")
 
     def test_log_failure_event_emits(self):
@@ -884,8 +836,10 @@ class TestProxyObservabilityLogger(unittest.TestCase):
             sys.stdout = old_stdout
 
         line = buf.getvalue().strip()
-        self.assertTrue(line.startswith("PROXY_LOG "), f"Expected PROXY_LOG prefix, got: {line!r}")
-        rec = json.loads(line[len("PROXY_LOG "):])
+        self.assertTrue(
+            line.startswith("PROXY_LOG "), f"Expected PROXY_LOG prefix, got: {line!r}"
+        )
+        rec = json.loads(line[len("PROXY_LOG ") :])
         self.assertEqual(rec["status"], "failure")
 
 
