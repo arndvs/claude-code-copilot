@@ -4,94 +4,33 @@ on:
   issues:
     types: [labeled]
 
+permissions:
+  contents: read
+  issues: write
+
 jobs:
-  plan:
-    if: github.event.label.name == 'agent:review'
+  plan-issue:
+    if: github.event.label.name == 'agent:plan'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     concurrency:
       group: sandcastle-issue-${{ github.event.issue.number }}
       cancel-in-progress: false
-
-    permissions:
-      contents: read
-      issues: write
-
     env:
-      ISSUE_NUMBER: ${{ github.event.issue.number }}
-
+      ANTHROPIC_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
+      ANTHROPIC_AUTH_TOKEN: ${{ secrets.LITELLM_MASTER_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
     steps:
-      - name: Checkout workflow actions
-        uses: actions/checkout@v4
-        with:
-          ref: dev
-
-      - name: Proxy preflight
-        id: proxy-preflight
-        env:
-          ANTHROPIC_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
-          ANTHROPIC_AUTH_TOKEN: ${{ secrets.LITELLM_MASTER_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: bash .sandcastle/scripts/proxy_preflight.sh
-
-      - name: Sandcastle setup
-        uses: ./.github/actions/sandcastle-setup
-        with:
-          trigger-label: agent:review
-          object-type: issue
-          object-number: ${{ env.ISSUE_NUMBER }}
-          checkout-ref: dev
-          skip-checkout: true
-          install-engine: ${{ steps.proxy-preflight.outputs.should_run }}
-          token: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
-
-      - name: Stop when proxy preflight skips
-        if: steps.proxy-preflight.outputs.should_run != 'true'
-        run: |
-          echo "Proxy preflight skipped agent run: ${{ steps.proxy-preflight.outputs.reason }}. ${{ steps.proxy-preflight.outputs.detail }}" > "${RUNNER_TEMP}/failure_reason.txt"
-          exit 1
-
-      - name: Run plan
-        if: steps.proxy-preflight.outputs.should_run == 'true'
+      - name: Transition labels
         env:
           GITHUB_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
-          ANTHROPIC_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
-          ANTHROPIC_AUTH_TOKEN: ${{ secrets.LITELLM_MASTER_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: |
-          cd .sandcastle/engine
-          pnpm --ignore-workspace exec tsx ../run.ts plan-issue \
-            --issue "$ISSUE_NUMBER"
-
-      - name: Transition label
-        if: steps.proxy-preflight.outputs.should_run == 'true' && success()
-        env:
-          AGENT_PAT: ${{ secrets.AGENT_PAT }}
-        run: |
-          if [ -z "$AGENT_PAT" ]; then
-            echo "AGENT_PAT is required to add agent:implement because GITHUB_TOKEN-created labels do not trigger workflows." > "${RUNNER_TEMP}/failure_reason.txt"
-            exit 1
-          fi
-          set +e
-          GH_TOKEN="$AGENT_PAT" gh issue edit "$ISSUE_NUMBER" \
-            --add-label "agent:implement" \
-            -R ${{ github.repository }}
-          status=$?
-          set -e
-          if [ "$status" -ne 0 ]; then
-            echo "AGENT_PAT failed to add agent:implement (status $status)." > "${RUNNER_TEMP}/failure_reason.txt"
-            exit 1
-          fi
-
-      - name: Sandcastle teardown
-        if: always()
-        uses: ./.github/actions/sandcastle-teardown
+          gh issue edit "$ISSUE_NUMBER" --remove-label "agent:plan" -R ${{ github.repository }} || true
+          gh issue edit "$ISSUE_NUMBER" --add-label "agent:in-progress" -R ${{ github.repository }}
+      - uses: arndvs/sandcastle-hub/actions/agent-run@main
         with:
-          trigger-label: agent:review
-          object-type: issue
-          object-number: ${{ env.ISSUE_NUMBER }}
+          workflow: plan-issue
+          ref: main
           token: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
-          run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          job-status: ${{ job.status }}
+          extra-args: --issue ${{ github.event.issue.number }}

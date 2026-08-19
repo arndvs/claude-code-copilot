@@ -1,20 +1,25 @@
-name: "Agent: Architecture Review"
+name: "Agent: Repo Hygiene"
 
 on:
   schedule:
-    - cron: "0 9 * * 1-5"
+    - cron: "0 10 * * 1-5"
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (no issue creation)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
   issues: write
 
 jobs:
-  architecture-review:
+  repo-hygiene:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     concurrency:
-      group: agent-architecture-review
+      group: agent-repo-hygiene
       cancel-in-progress: false
     env:
       ANTHROPIC_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
@@ -23,6 +28,7 @@ jobs:
     steps:
       - uses: arndvs/sandcastle-hub/actions/agent-run@main
         with:
-          workflow: architecture-review
+          workflow: repo-hygiene
           ref: main
           token: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+          extra-args: $([ "${{ github.event.inputs.dry_run }}" = "true" ] && echo --dry-run)

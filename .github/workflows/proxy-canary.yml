@@ -55,7 +55,7 @@ jobs:
           # The script always exits 0, writes status/detail/http_code to stdout
           # and GITHUB_OUTPUT. Capture stdout so the same values are available for
           # the status-summary log below (writing twice is idempotent in Actions).
-          probe_script=".sandcastle/scripts/probe_completion.sh"
+          probe_script="$RUNNER_TEMP/probe_completion.sh"
           if [ ! -f "$probe_script" ]; then
             echo "status=fail" >> "$GITHUB_OUTPUT"
             echo "detail=probe script missing: $probe_script" >> "$GITHUB_OUTPUT"
@@ -80,6 +80,12 @@ jobs:
                       echo "⚠️ degraded: $detail" ;;
             fail)     echo "❌ proxy canary: $detail" ;;
           esac
+
+      - name: Fetch probe script from hub
+        run: |
+          curl -fsSL "https://raw.githubusercontent.com/arndvs/sandcastle-hub/main/templates/scripts/probe_completion.sh" \
+            -o "$RUNNER_TEMP/probe_completion.sh"
+          chmod +x "$RUNNER_TEMP/probe_completion.sh"
 
       - name: Open or update the canary issue on failure
         if: steps.probe.outputs.status == 'fail'
