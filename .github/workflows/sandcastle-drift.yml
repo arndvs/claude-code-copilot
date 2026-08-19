@@ -1,105 +1,57 @@
-name: "Sandcastle: Detect Drift"
-
-# Detect drift between the vendored .sandcastle/ + .github/workflows/agent-*.yml
-# and the ctrlshft producer source (dotfiles/shft). If the vendored files have
-# drifted from source, open a PR to re-vendor them.
-#
-# This is the safety net that guarantees producer changes (gitflow guards,
-# security hardening, engine updates) actually reach consumer repos. Without it,
-# a repo that misses `ctrl update-sandcastle` silently drifts and workflows break
-# (the proxy_preflight.sh incident).
-#
-# NOTE: This workflow is itself vendored. It runs `update-sandcastle.sh --dry-run`
-# which compares against the producer source at $DOTFILES/shft. The producer path
-# is resolved from the DOTFILES env var (defaults to ~/dotfiles).
+name: "Sandcastle: Drift"
 
 on:
   schedule:
-    - cron: "41 9 * * 1" # Mondays 09:41 UTC — weekly drift check
+    - cron: "41 9 * * 1"
   workflow_dispatch:
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
-  detect-drift:
+  check-drift:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    permissions:
-      contents: write
-      pull-requests: write
     env:
-      GH_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
-      GH_REPO: ${{ github.repository }}
-      DOTFILES: ${{ github.workspace }}/dotfiles
+      GITHUB_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           fetch-depth: 1
 
-      - name: Checkout producer source (dotfiles)
-        uses: actions/checkout@v4
-        with:
-          repository: arndvs/dotfiles-private
-          token: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
-          path: dotfiles
-          fetch-depth: 1
-
-      - name: Run drift detection (dry-run)
+      - name: Compare pinned SHA vs hub latest
         id: drift
         run: |
           set -euo pipefail
-          if [ ! -f ".sandcastle/engine" ] && [ ! -d ".sandcastle/engine" ]; then
-            echo "No .sandcastle/engine/ — sandcastle not initialized. Skipping."
-            echo "drift=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # update-sandcastle.sh --dry-run exits 0 with "No drift detected" or
-          # prints the drift report. Capture both the exit code and output.
-          set +e
-          output="$(bash "$DOTFILES/bin/update-sandcastle.sh" --dry-run 2>&1)"
-          rc=$?
-          set -e
-          if [ "$rc" -eq 0 ] && ! echo "$output" | grep -q "Drift detected"; then
-            echo "No drift detected. Vendored files match producer source."
-            echo "drift=false" >> "$GITHUB_OUTPUT"
+          pinned=$(jq -r '.lastPinnedSha' .sandcastle/hub-version.json 2>/dev/null || echo "unknown")
+          latest=$(gh api repos/arndvs/sandcastle-hub/commits/main --jq '.sha' | cut -c1-7)
+          echo "pinned=$pinned"
+          echo "latest=$latest"
+          if [ "$pinned" != "$latest" ]; then
+            echo "drifted=true" >> "$GITHUB_OUTPUT"
+            echo "latest_sha=$latest" >> "$GITHUB_OUTPUT"
           else
-            echo "Drift detected:"
-            echo "$output"
-            echo "drift=true" >> "$GITHUB_OUTPUT"
-            # Persist the report for the PR body
-            echo "$output" > /tmp/sandcastle-drift-report.txt
+            echo "drifted=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Open re-vendor PR if drift detected
-        if: steps.drift.outputs.drift == 'true'
+      - name: Open review PR on drift
+        if: steps.drift.outputs.drifted == 'true'
+        env:
+          LATEST_SHA: ${{ steps.drift.outputs.latest_sha }}
         run: |
           set -euo pipefail
-          branch="sandcastle/revendor-$(date +%Y%m%d)"
-          git config user.name "sandcastle-drift[bot]"
-          git config user.email "sandcastle-drift[bot]@users.noreply.github.com"
+          branch="sandcastle/hub-review-$(date +%Y%m%d)"
+          git config user.name "claude-code[bot]"
+          git config user.email "claude-code[bot]@users.noreply.github.com"
           git checkout -b "$branch"
-          # Re-vendor by running the update script non-interactively (answer 'a' to update all)
-          echo "a" | bash "$DOTFILES/bin/update-sandcastle.sh" >/dev/null 2>&1 || true
-          if git diff --quiet; then
-            echo "No changes after re-vendor — drift report only."
-            exit 0
-          fi
-          git add -A
-          git commit -m "chore(sandcastle): re-vendor from producer source
-
-          Automated by the Sandcastle drift-detection workflow. Re-syncs vendored
-          .sandcastle/ and .github/workflows/agent-*.yml with the ctrlshft producer.
-
-          Drift report:
-          $(cat /tmp/sandcastle-drift-report.txt)"
+          jq --arg sha "$LATEST_SHA" '.lastPinnedSha = $sha' .sandcastle/hub-version.json > tmp.json && mv tmp.json .sandcastle/hub-version.json
+          git add .sandcastle/hub-version.json
+          git commit -m "chore(sandcastle): pin hub to $LATEST_SHA"
           git push origin "$branch"
-          # Open PR to the default branch
-          gh pr create \
-            --base "dev" \
+          gh pr create -R ${{ github.repository }} \
+            --base dev \
             --head "$branch" \
-            --title "chore(sandcastle): re-vendor from producer source" \
-            --body "Automated re-vendor PR from the Sandcastle drift-detection workflow.
-
-            Detected drift between vendored Sandcastle files and the producer source.
-            This PR re-syncs them. Review and merge to keep this repo's pipeline current.
-
-            $(cat /tmp/sandcastle-drift-report.txt)"
+            --title "chore(sandcastle): review hub SHA update to $LATEST_SHA" \
+            --body "The hub engine updated on main. This PR reviews the new SHA before pinning." || true

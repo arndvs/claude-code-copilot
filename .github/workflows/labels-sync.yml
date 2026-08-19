@@ -1,48 +1,39 @@
 name: "Labels: Sync"
 
-# Reconcile GitHub labels from the vendored .sandcastle/labels.json so a missing or
-# drifted label can't strand issues in agent:blocked. Runs when the label set changes
-# on the default branch, on a weekly cron, and on demand. Idempotent (create-or-update).
-
 on:
-  push:
-    # Default branch + main: labels.json lands on the default branch via PR, then reaches main on
-    # promotion; reconcile on both (a duplicate entry when the default already IS main is harmless).
-    branches: ["dev", "main"]
-    paths:
-      - ".sandcastle/labels.json"
   schedule:
-    - cron: "23 9 * * 1" # Mondays 09:23 UTC — weekly reconcile
+    - cron: "23 9 * * 1"
   workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
 
 jobs:
   sync-labels:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    permissions:
-      contents: read
-      issues: write
     env:
       GH_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
       GH_REPO: ${{ github.repository }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: Reconcile labels from .sandcastle/labels.json
+      - name: Fetch labels from hub
         run: |
           set -euo pipefail
-          labels_file=".sandcastle/labels.json"
-          if [ ! -f "$labels_file" ]; then
-            echo "No $labels_file — nothing to sync."
+          curl -fsSL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github.raw" \
+            "https://api.github.com/repos/arndvs/sandcastle-hub/contents/templates/labels.json?ref=main" \
+            > "$RUNNER_TEMP/labels.json"
+
+      - name: Reconcile labels
+        run: |
+          set -euo pipefail
+          labels_file="$RUNNER_TEMP/labels.json"
+          if [ ! -s "$labels_file" ]; then
+            echo "No labels fetched from hub — nothing to sync."
             exit 0
           fi
-          # Capture the label rows up front so invalid JSON fails the step explicitly. Process
-          # substitution (`done < <(jq ...)`) would mask a jq parse error under `set -euo pipefail`:
-          # the loop would read zero rows and the step would still succeed. Iterating a here-string
-          # keeps `failed` in this shell (no subshell), so a failed reconcile still fails the run.
           rows="$(jq -c '.[]' "$labels_file")" || {
             echo "Invalid JSON in $labels_file — aborting." >&2
             exit 1
