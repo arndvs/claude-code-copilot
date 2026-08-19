@@ -25,3 +25,4 @@ jobs:
           workflow: architecture-review
           ref: main
           token: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+# hub model
