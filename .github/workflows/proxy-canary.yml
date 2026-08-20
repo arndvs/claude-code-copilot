@@ -21,6 +21,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Fetch probe script from hub
+        run: |
+          curl -fsSL "https://raw.githubusercontent.com/arndvs/sandcastle-hub/main/templates/scripts/probe_completion.sh" \
+            -o "$RUNNER_TEMP/probe_completion.sh"
+          chmod +x "$RUNNER_TEMP/probe_completion.sh"
+
       - name: Probe proxy (readiness + real completion)
         id: probe
         env:
@@ -80,12 +86,6 @@ jobs:
                       echo "⚠️ degraded: $detail" ;;
             fail)     echo "❌ proxy canary: $detail" ;;
           esac
-
-      - name: Fetch probe script from hub
-        run: |
-          curl -fsSL "https://raw.githubusercontent.com/arndvs/sandcastle-hub/main/templates/scripts/probe_completion.sh" \
-            -o "$RUNNER_TEMP/probe_completion.sh"
-          chmod +x "$RUNNER_TEMP/probe_completion.sh"
 
       - name: Open or update the canary issue on failure
         if: steps.probe.outputs.status == 'fail'

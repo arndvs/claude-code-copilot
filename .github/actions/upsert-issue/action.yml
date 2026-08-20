@@ -61,8 +61,10 @@ runs:
         else
           gh label create "$LABEL" --repo "$GITHUB_REPOSITORY" --color "$LABEL_COLOR" \
             --description "$LABEL_DESCRIPTION" 2>/dev/null || true
-          created=$(gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" \
-            --label "$LABEL" --body "$body" --json number --jq '.number')
+          created_url=$(gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" \
+            --label "$LABEL" --body "$body")
+          # gh issue create prints the issue URL; extract the number for the output.
+          created="${created_url##*/}"
           echo "issue_number=$created" >> "$GITHUB_OUTPUT"
           echo "action_taken=created" >> "$GITHUB_OUTPUT"
         fi
