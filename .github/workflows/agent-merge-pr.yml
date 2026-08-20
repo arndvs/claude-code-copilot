@@ -4,6 +4,11 @@ on:
   pull_request_target:
     types: [labeled]
 
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
 jobs:
   refuse-fork:
     if: github.event.label.name == 'agent:merge' && github.event.pull_request.head.repo.full_name != github.repository
@@ -11,163 +16,18 @@ jobs:
     permissions:
       pull-requests: write
       issues: write
-
     env:
       PR_NUMBER: ${{ github.event.pull_request.number }}
-      GITHUB_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
-
     steps:
-      - name: Block unsafe fork execution
+      - name: Refuse unsafe fork
         run: |
           gh pr edit "$PR_NUMBER" --remove-label "agent:merge" -R ${{ github.repository }} || true
           gh pr edit "$PR_NUMBER" --add-label "agent:blocked" -R ${{ github.repository }} || true
-          gh pr comment "$PR_NUMBER" -R ${{ github.repository }} --body "Refused to run \`agent:merge\`: this workflow uses \`pull_request_target\` and cannot safely execute agent code for fork PRs. Recreate the PR from a branch in this repository, or merge manually after review."
-
-  refuse-non-owner:
-    if: github.event.label.name == 'agent:merge' && github.event.pull_request.head.repo.full_name == github.repository && !contains(fromJSON('["OWNER","MEMBER"]'), github.event.sender.type)
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-      issues: write
-
-    env:
-      PR_NUMBER: ${{ github.event.pull_request.number }}
-      GITHUB_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
-
-    steps:
-      - name: Block non-owner execution
-        run: |
-          gh pr edit "$PR_NUMBER" --remove-label "agent:merge" -R ${{ github.repository }} || true
-          gh pr edit "$PR_NUMBER" --add-label "agent:blocked" -R ${{ github.repository }} || true
-          gh pr comment "$PR_NUMBER" -R ${{ github.repository }} --body "Refused to run \`agent:merge\`: only repository OWNER or MEMBER can trigger this workflow. Re-apply the label from an authorized account."
+          gh pr comment "$PR_NUMBER" -R ${{ github.repository }} --body "Refused to run \`agent:merge\`: this workflow uses \`pull_request_target\` and cannot safely execute agent code for fork PRs."
 
   merge:
-    if: github.event.label.name == 'agent:merge' && github.event.pull_request.head.repo.full_name == github.repository && contains(fromJSON('["OWNER","MEMBER"]'), github.event.sender.type)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    concurrency:
-      group: sandcastle-pr-${{ github.event.pull_request.number }}
-      cancel-in-progress: false
-
-    permissions:
-      contents: write
-      pull-requests: write
-      issues: write
-
-    env:
-      PR_NUMBER: ${{ github.event.pull_request.number }}
-
-    steps:
-      - name: Checkout workflow actions
-        uses: actions/checkout@v4
-        with:
-          ref: dev
-
-      - name: Fetch PR head sandcastle.config.json
-        id: fetch-pr-head-config
-        env:
-          GITHUB_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
-        run: |
-          gh api -H "Accept: application/vnd.github.raw" \
-            "repos/${{ github.repository }}/contents/sandcastle.config.json?ref=${{ github.event.pull_request.head.sha }}" \
-            > "$RUNNER_TEMP/pr-head-sandcastle.config.json" 2>/dev/null || true
-          if [ -s "$RUNNER_TEMP/pr-head-sandcastle.config.json" ]; then
-            echo "config_path=$RUNNER_TEMP/pr-head-sandcastle.config.json" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Proxy preflight
-        id: proxy-preflight
-        env:
-          ANTHROPIC_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
-          ANTHROPIC_AUTH_TOKEN: ${{ secrets.LITELLM_MASTER_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          SANDCASTLE_CONFIG_PATH: ${{ steps.fetch-pr-head-config.outputs.config_path }}
-        run: bash .sandcastle/scripts/proxy_preflight.sh
-
-      - name: Sandcastle setup
-        uses: ./.github/actions/sandcastle-setup
-        with:
-          trigger-label: agent:merge
-          object-type: pr
-          object-number: ${{ env.PR_NUMBER }}
-          checkout-ref: ${{ github.event.pull_request.head.ref }}
-          skip-checkout: ${{ steps.proxy-preflight.outputs.should_run != 'true' }}
-          install-engine: ${{ steps.proxy-preflight.outputs.should_run }}
-          token: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
-
-      - name: Stop when proxy preflight skips
-        if: steps.proxy-preflight.outputs.should_run != 'true'
-        env:
-          PREFLIGHT_REASON: ${{ steps.proxy-preflight.outputs.reason }}
-          PREFLIGHT_DETAIL: ${{ steps.proxy-preflight.outputs.detail }}
-        run: |
-          echo "Proxy preflight skipped agent run: ${PREFLIGHT_REASON}. ${PREFLIGHT_DETAIL}" > "${RUNNER_TEMP}/failure_reason.txt"
-          exit 1
-
-      - name: Mark PR ready (un-draft)
-        if: steps.proxy-preflight.outputs.should_run == 'true'
-        env:
-          GITHUB_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
-        run: |
-          is_draft=$(gh pr view "$PR_NUMBER" -R ${{ github.repository }} --json isDraft --jq '.isDraft')
-          if [ "$is_draft" = "true" ]; then
-            gh pr ready "$PR_NUMBER" -R ${{ github.repository }}
-          else
-            echo "PR #$PR_NUMBER is already marked ready; skipping."
-          fi
-
-      - name: Run merge
-        if: steps.proxy-preflight.outputs.should_run == 'true'
-        env:
-          GITHUB_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
-          ANTHROPIC_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
-          ANTHROPIC_AUTH_TOKEN: ${{ secrets.LITELLM_MASTER_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: |
-          cd .sandcastle/engine
-          pnpm --ignore-workspace exec tsx ../run.ts merge-pr \
-            --pr ${{ github.event.pull_request.number }}
-
-      - name: Close linked issues
-        if: steps.proxy-preflight.outputs.should_run == 'true' && success()
-        env:
-          GITHUB_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          # GitHub only auto-closes `Closes #N`/`Fixes #N`/`Resolves #N` issues when a PR
-          # merges into the repo's *default* branch. Sandcastle PRs merge into
-          # sandcastle.config.json's baseBranch (often not the default branch), so
-          # GitHub never populates closingIssuesReferences and never auto-closes here.
-          # Parse the PR body ourselves and close explicitly.
-          body=$(gh pr view "$PR_NUMBER" -R ${{ github.repository }} --json body --jq '.body')
-          issue_numbers=$(printf '%s' "$body" | grep -oiP '\b(close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#\K[0-9]+' | sort -u || true)
-          for issue_number in $issue_numbers; do
-            # PRs are addressable via the issues API, so `gh issue close <n>` would
-            # also close a PR referenced in the body (e.g. "Fixes #123" where #123 is
-            # a PR). Look each number up and skip entries that are PRs or missing.
-            is_pr=$(gh api "repos/${{ github.repository }}/issues/$issue_number" --jq 'has("pull_request")' 2>/dev/null || echo "missing")
-            if [ "$is_pr" = "true" ] || [ "$is_pr" = "missing" ]; then
-              echo "Skipping #$issue_number (PR or not found); only closing issues."
-              continue
-            fi
-            gh issue close "$issue_number" -R ${{ github.repository }} --comment "Closed via merge of #${PR_NUMBER} (auto-close doesn't fire for non-default-branch merges)." || true
-          done
-
-      - name: Restore workflow actions
-        if: always()
-        uses: actions/checkout@v4
-        with:
-          ref: dev
-
-      - name: Sandcastle teardown
-        if: always()
-        uses: ./.github/actions/sandcastle-teardown
-        with:
-          trigger-label: agent:merge
-          object-type: pr
-          object-number: ${{ env.PR_NUMBER }}
-          token: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
-          run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          job-status: ${{ job.status }}
+    if: github.event.label.name == 'agent:merge' && github.event.pull_request.head.repo.full_name == github.repository
+    uses: arndvs/sandcastle-hub/.github/workflows/reusable-merge-pr.yml@main
+    with:
+      pr-number: ${{ github.event.pull_request.number }}
+    secrets: inherit

@@ -26,6 +26,12 @@ jobs:
       - name: Install PyYAML
         run: pip install pyyaml
 
+      - name: Fetch probe script from hub
+        run: |
+          curl -fsSL "https://raw.githubusercontent.com/arndvs/sandcastle-hub/main/templates/scripts/probe_completion.sh" \
+            -o "$RUNNER_TEMP/probe_completion.sh"
+          chmod +x "$RUNNER_TEMP/probe_completion.sh"
+
       - name: Probe each configured alias through the proxy
         id: probe
         env:
@@ -52,7 +58,7 @@ jobs:
           fi
           echo "Aliases under test:"; echo "$aliases" | sed 's/^/  /'
 
-          probe_script=".sandcastle/scripts/probe_completion.sh"
+          probe_script="$RUNNER_TEMP/probe_completion.sh"
           if [ ! -f "$probe_script" ]; then
             echo "::error::Probe script missing: $probe_script"
             exit 1

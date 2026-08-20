@@ -2,9 +2,12 @@ name: "Agent: Architecture Review"
 
 on:
   schedule:
-    # 09:00 UTC, Monday-Friday. GitHub may delay scheduled runs under load.
     - cron: "0 9 * * 1-5"
   workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
 
 jobs:
   architecture-review:
@@ -13,123 +16,12 @@ jobs:
     concurrency:
       group: agent-architecture-review
       cancel-in-progress: false
-
-    permissions:
-      contents: read
-      issues: write
-
     env:
-      GITHUB_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
-      GH_REPO: ${{ github.repository }}
-
+      ANTHROPIC_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
+      ANTHROPIC_AUTH_TOKEN: ${{ secrets.LITELLM_MASTER_KEY }}
     steps:
-      - name: Checkout workflow actions
-        uses: actions/checkout@v4
+      - uses: arndvs/sandcastle-hub/actions/agent-run@main
         with:
-          ref: dev
-
-      - name: Proxy preflight
-        id: proxy-preflight
-        env:
-          ANTHROPIC_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
-          ANTHROPIC_AUTH_TOKEN: ${{ secrets.LITELLM_MASTER_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: bash .sandcastle/scripts/proxy_preflight.sh
-
-      - name: Sandcastle setup
-        if: steps.proxy-preflight.outputs.should_run == 'true'
-        uses: ./.github/actions/sandcastle-setup
-        with:
-          checkout-ref: dev
-          checkout-fetch-depth: 1
-          skip-checkout: true
+          workflow: architecture-review
+          ref: main
           token: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
-          manage-labels: false
-
-      - name: Run architecture review
-        if: steps.proxy-preflight.outputs.should_run == 'true'
-        env:
-          ANTHROPIC_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
-          ANTHROPIC_AUTH_TOKEN: ${{ secrets.LITELLM_MASTER_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: |
-          set -euo pipefail
-          cd .sandcastle/engine
-          max_attempts=2
-          for attempt in $(seq 1 "$max_attempts"); do
-            echo "Architecture review attempt $attempt/$max_attempts"
-            if pnpm --ignore-workspace exec tsx ../run.ts architecture-review; then
-              exit 0
-            fi
-            if [ "$attempt" -lt "$max_attempts" ]; then
-              echo "::warning::Architecture review attempt $attempt failed; retrying once in 30 seconds."
-              sleep 30
-            fi
-          done
-          echo "Architecture review failed after $max_attempts attempts."
-          exit 1
-
-      - name: Publish PRD issue
-        if: steps.proxy-preflight.outputs.should_run == 'true'
-        id: publish
-        env:
-          OUTPUT_FILE: ${{ runner.temp }}/architecture_review_output.json
-          TITLE_FILE: ${{ runner.temp }}/prd_title.txt
-          BODY_FILE: ${{ runner.temp }}/prd_body.md
-          LABEL: source:architecture-review
-        run: |
-          set -euo pipefail
-          status=$(jq -r '.status' "$OUTPUT_FILE")
-          if [ "$status" != "proposed" ]; then
-            echo "Status is '$status' — nothing to publish."
-            exit 0
-          fi
-
-          title=$(cat "$TITLE_FILE")
-          gh label create "$LABEL" \
-            --color "5319E7" \
-            --description "PRDs proposed by the automated architecture-review workflow" \
-            >/dev/null 2>&1 || true
-
-          issue_url=$(gh issue create \
-            --title "$title" \
-            --body-file "$BODY_FILE" \
-            --label "$LABEL" | tail -n1)
-          issue_number=$(basename "$issue_url")
-
-          echo "issue_url=$issue_url" >> "$GITHUB_OUTPUT"
-          echo "issue_number=$issue_number" >> "$GITHUB_OUTPUT"
-          echo "Published #${issue_number}: ${issue_url}"
-
-      - name: Summarise run
-        if: always()
-        env:
-          OUTPUT_FILE: ${{ runner.temp }}/architecture_review_output.json
-        run: |
-          if [ ! -f "$OUTPUT_FILE" ]; then
-            echo "No output file produced — agent likely crashed before emitting a result."
-            exit 0
-          fi
-
-          status=$(jq -r '.status' "$OUTPUT_FILE")
-          {
-            echo "## Architecture review"
-            echo ""
-            if [ "$status" = "proposed" ]; then
-              issue_url="${{ steps.publish.outputs.issue_url }}"
-              title=$(jq -r '.title' "$OUTPUT_FILE")
-              summary=$(jq -r '.oneLineSummary' "$OUTPUT_FILE")
-              echo "**Created:** [$title]($issue_url)"
-              echo ""
-              echo "$summary"
-              echo ""
-              echo "### Candidates considered"
-              jq -r '.candidatesConsidered[] | "- \(.)"' "$OUTPUT_FILE"
-            elif [ "$status" = "skipped" ]; then
-              reason=$(jq -r '.reason' "$OUTPUT_FILE")
-              echo "**Skipped — no fresh candidates today.**"
-              echo ""
-              echo "$reason"
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"

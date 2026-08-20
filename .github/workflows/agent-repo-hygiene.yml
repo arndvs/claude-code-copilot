@@ -1,20 +1,25 @@
-name: "Agent: Check Stale PRs"
+name: "Agent: Repo Hygiene"
 
 on:
   schedule:
-    - cron: "17 9 * * 1-5"
+    - cron: "0 10 * * 1-5"
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (no issue creation)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
-  pull-requests: write
+  issues: write
 
 jobs:
-  check-stale:
+  repo-hygiene:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
     concurrency:
-      group: agent-check-stale-prs
+      group: agent-repo-hygiene
       cancel-in-progress: false
     env:
       ANTHROPIC_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
@@ -22,6 +27,7 @@ jobs:
     steps:
       - uses: arndvs/sandcastle-hub/actions/agent-run@main
         with:
-          workflow: check-stale-prs
+          workflow: repo-hygiene
           ref: main
           token: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+          extra-args: $([ "${{ github.event.inputs.dry_run }}" = "true" ] && echo --dry-run)
