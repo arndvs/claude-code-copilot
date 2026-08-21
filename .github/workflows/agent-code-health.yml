@@ -1,0 +1,41 @@
+name: "Agent: Code Health Audit"
+
+on:
+  schedule:
+    # 07:00 UTC Mondays. Weekly, not nightly: structural findings are stable, so
+    # a daily cadence mostly re-discovers what it found yesterday.
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+    inputs:
+      lens:
+        description: "Run a single lens instead of all enabled ones"
+        required: false
+        type: choice
+        options: ["", "naming", "structure", "types", "orientation", "verification", "logging", "assets"]
+      dry_run:
+        description: "Produce findings but do not file an issue"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  code-health-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    concurrency:
+      group: agent-code-health-audit
+      cancel-in-progress: false
+    env:
+      ANTHROPIC_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
+      ANTHROPIC_AUTH_TOKEN: ${{ secrets.LITELLM_MASTER_KEY }}
+    steps:
+      - uses: arndvs/sandcastle-hub/actions/agent-run@main
+        with:
+          workflow: code-health
+          ref: main
+          token: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
+          extra-args: $([ -n "${{ inputs.lens }}" ] && echo "--lens ${{ inputs.lens }}") $([ "${{ github.event.inputs.dry_run }}" = "true" ] && echo --dry-run)
